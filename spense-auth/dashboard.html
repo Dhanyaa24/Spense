@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SpendSense - Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --savory-sage: #818263;
+            --avocado-smoothie: #C2C395;
+            --blush-beet: #DDBAAE;
+            --peach-protein: #EFD7CF;
+            --oat-latte: #DCD4C1;
+            --honey-oatmilk: #F6EAD4;
+            --coconut-cream: #FFFAF2;
+            --dark-text: #2d2d2d;
+            --light-text: #5a5a5a;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--coconut-cream);
+            color: var(--dark-text);
+            min-height: 100vh;
+        }
+
+        /* Navigation */
+        nav {
+            background: white;
+            padding: 1.5rem 5%;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        nav .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-family: 'DM Serif Display', serif;
+            font-size: 1.8rem;
+            color: var(--savory-sage);
+            font-style: italic;
+        }
+
+        .user-section {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .user-avatar {
+            width: 45px;
+            height: 45px;
+            background: linear-gradient(135deg, var(--savory-sage) 0%, #6d6e52 100%);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+
+        .user-details {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .user-name {
+            font-weight: 600;
+            color: var(--dark-text);
+        }
+
+        .user-email {
+            font-size: 0.85rem;
+            color: var(--light-text);
+        }
+
+        .logout-btn {
+            padding: 0.7rem 1.5rem;
+            background: var(--savory-sage);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        .logout-btn:hover {
+            background: #6d6e52;
+            transform: translateY(-2px);
+        }
+
+        /* Main Content */
+        .main-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 3rem 5%;
+        }
+
+        .welcome-section {
+            margin-bottom: 3rem;
+        }
+
+        .page-title {
+            font-family: 'DM Serif Display', serif;
+            font-size: 3rem;
+            color: var(--dark-text);
+            margin-bottom: 0.5rem;
+            font-weight: 400;
+        }
+
+        .page-subtitle {
+            color: var(--light-text);
+            font-size: 1.1rem;
+            font-weight: 300;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 2rem;
+            margin-bottom: 3rem;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, var(--honey-oatmilk) 0%, var(--coconut-cream) 100%);
+            padding: 2rem;
+            border-radius: 20px;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-label {
+            font-size: 0.9rem;
+            color: var(--light-text);
+            margin-bottom: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 500;
+        }
+
+        .stat-value {
+            font-family: 'DM Serif Display', serif;
+            font-size: 2.5rem;
+            color: var(--savory-sage);
+            font-weight: 400;
+        }
+
+        .stat-description {
+            margin-top: 0.5rem;
+            font-size: 0.85rem;
+            color: var(--light-text);
+        }
+
+        /* Cards */
+        .card {
+            background: white;
+            border-radius: 20px;
+            padding: 2.5rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        .card-title {
+            font-family: 'DM Serif Display', serif;
+            font-size: 2rem;
+            color: var(--dark-text);
+            font-weight: 400;
+        }
+
+        .badge {
+            padding: 0.5rem 1rem;
+            background: var(--avocado-smoothie);
+            color: var(--dark-text);
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        /* Info List */
+        .info-list {
+            display: flex;
+            flex-direction: column;
+            gap: 1.2rem;
+        }
+
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.2rem;
+            background: var(--coconut-cream);
+            border-radius: 12px;
+        }
+
+        .info-label {
+            font-weight: 500;
+            color: var(--dark-text);
+        }
+
+        .info-value {
+            font-weight: 600;
+            color: var(--savory-sage);
+        }
+
+        /* Feature Grid */
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .feature-item {
+            padding: 1.5rem;
+            background: linear-gradient(135deg, var(--peach-protein) 0%, var(--blush-beet) 100%);
+            border-radius: 15px;
+            text-align: center;
+        }
+
+        .feature-icon {
+            width: 50px;
+            height: 50px;
+            background: var(--savory-sage);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 1rem;
+        }
+
+        .feature-icon svg {
+            width: 24px;
+            height: 24px;
+            fill: white;
+        }
+
+        .feature-title {
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: var(--dark-text);
+        }
+
+        .feature-description {
+            font-size: 0.85rem;
+            color: var(--light-text);
+            line-height: 1.5;
+        }
+
+        /* Loading State */
+        .loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 60vh;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid var(--honey-oatmilk);
+            border-top-color: var(--savory-sage);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            margin-top: 1rem;
+            color: var(--light-text);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .user-info {
+                display: none;
+            }
+
+            .page-title {
+                font-size: 2.2rem;
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .card {
+                padding: 1.5rem;
+            }
+
+            .card-title {
+                font-size: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav>
+        <div class="container">
+            <div class="logo">SpendSense</div>
+            <div class="user-section">
+                <div class="user-info">
+                    <div class="user-avatar" id="userAvatar">U</div>
+                    <div class="user-details">
+                        <div class="user-name" id="userName">Loading...</div>
+                        <div class="user-email" id="userEmail">Loading...</div>
+                    </div>
+                </div>
+                <button class="logout-btn" onclick="logout()">Logout</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Loading State -->
+    <div id="loading" class="loading">
+        <div class="spinner"></div>
+        <div class="loading-text">Loading your dashboard...</div>
+    </div>
+
+    <!-- Main Content (hidden until loaded) -->
+    <div id="mainContent" class="main-container" style="display: none;">
+        <!-- Welcome Section -->
+        <div class="welcome-section">
+            <h1 class="page-title">Welcome back, <span id="welcomeName">User</span>! 👋</h1>
+            <p class="page-subtitle">Here's your financial overview</p>
+        </div>
+
+        <!-- Stats Grid -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Account Status</div>
+                <div class="stat-value">Active</div>
+                <div class="stat-description">Your account is fully verified</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Member Since</div>
+                <div class="stat-value" id="memberSince">2024</div>
+                <div class="stat-description">Thank you for being with us</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Security Level</div>
+                <div class="stat-value">High</div>
+                <div class="stat-description">Password encrypted & secured</div>
+            </div>
+        </div>
+
+        <!-- Account Information Card -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Account Information</h2>
+                <div class="badge">Verified</div>
+            </div>
+            <div class="info-list">
+                <div class="info-item">
+                    <span class="info-label">User ID</span>
+                    <span class="info-value" id="userId">#0000</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Email Address</span>
+                    <span class="info-value" id="displayEmail">user@example.com</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Full Name</span>
+                    <span class="info-value" id="displayName">User Name</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Account Created</span>
+                    <span class="info-value" id="createdAt">Just now</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Features Card -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">What's Next?</h2>
+            </div>
+            <div class="feature-grid">
+                <div class="feature-item">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1.41 16.09V20h-2.67v-1.93c-1.71-.36-3.16-1.46-3.27-3.4h1.96c.1 1.05.82 1.87 2.65 1.87 1.96 0 2.4-.98 2.4-1.59 0-.83-.44-1.61-2.67-2.14-2.48-.6-4.18-1.62-4.18-3.67 0-1.72 1.39-2.84 3.11-3.21V4h2.67v1.95c1.86.45 2.79 1.86 2.85 3.39H14.3c-.05-1.11-.64-1.87-2.22-1.87-1.5 0-2.4.68-2.4 1.64 0 .84.65 1.39 2.67 1.91s4.18 1.39 4.18 3.91c-.01 1.83-1.38 2.83-3.12 3.16z"/>
+                        </svg>
+                    </div>
+                    <div class="feature-title">Track Expenses</div>
+                    <div class="feature-description">Start logging your daily spending</div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/>
+                        </svg>
+                    </div>
+                    <div class="feature-title">Set Goals</div>
+                    <div class="feature-description">Create savings targets</div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/>
+                        </svg>
+                    </div>
+                    <div class="feature-title">View Reports</div>
+                    <div class="feature-description">Analyze your spending patterns</div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/>
+                        </svg>
+                    </div>
+                    <div class="feature-title">Manage Subscriptions</div>
+                    <div class="feature-description">Track recurring payments</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Success Message Card -->
+        <div class="card" style="background: linear-gradient(135deg, var(--avocado-smoothie) 0%, var(--oat-latte) 100%);">
+            <div style="text-align: center;">
+                <h2 style="font-family: 'DM Serif Display', serif; font-size: 2rem; margin-bottom: 1rem; color: var(--dark-text);">
+                    🎉 Authentication Successful!
+                </h2>
+                <p style="color: var(--light-text); font-size: 1.05rem; line-height: 1.7;">
+                    You've successfully logged in with backend authentication. Your session is secured with JWT token,
+                    and your password is safely encrypted in the database. This is your starting point to build the full
+                    SpendSense finance management features!
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * DASHBOARD JAVASCRIPT
+         * Checks authentication and displays user information
+         */
+
+        const API_URL = 'http://localhost:3000/api';
+
+        /**
+         * Check Authentication
+         * Verifies if user has a valid token
+         */
+        async function checkAuth() {
+            const token = localStorage.getItem('token');
+            const userString = localStorage.getItem('user');
+
+            // If no token, redirect to login
+            if (!token) {
+                window.location.href = 'login.html';
+                return;
+            }
+
+            try {
+                // Fetch user profile from backend
+                const response = await fetch(`${API_URL}/profile`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    displayUserInfo(data.user);
+                } else {
+                    // Token invalid or expired
+                    if (userString) {
+                        // Use cached user data
+                        const user = JSON.parse(userString);
+                        displayUserInfo(user);
+                    } else {
+                        localStorage.removeItem('token');
+                        localStorage.removeItem('user');
+                        window.location.href = 'login.html';
+                    }
+                }
+            } catch (error) {
+                console.error('Auth check error:', error);
+                
+                // Use cached user data if available
+                if (userString) {
+                    const user = JSON.parse(userString);
+                    displayUserInfo(user);
+                } else {
+                    window.location.href = 'login.html';
+                }
+            }
+        }
+
+        /**
+         * Display User Information
+         */
+        function displayUserInfo(user) {
+            // Hide loading, show content
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('mainContent').style.display = 'block';
+
+            // Set user info in navigation
+            document.getElementById('userName').textContent = user.name;
+            document.getElementById('userEmail').textContent = user.email;
+            document.getElementById('userAvatar').textContent = user.name.charAt(0).toUpperCase();
+
+            // Set welcome message
+            document.getElementById('welcomeName').textContent = user.name.split(' ')[0];
+
+            // Set account information
+            document.getElementById('userId').textContent = '#' + user.id;
+            document.getElementById('displayEmail').textContent = user.email;
+            document.getElementById('displayName').textContent = user.name;
+
+            // Format and display created date
+            if (user.created_at) {
+                const date = new Date(user.created_at);
+                const year = date.getFullYear();
+                
+                document.getElementById('memberSince').textContent = year;
+                document.getElementById('createdAt').textContent = date.toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            }
+        }
+
+        /**
+         * Logout Function
+         */
+        function logout() {
+            if (confirm('Are you sure you want to logout?')) {
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.href = 'login.html';
+            }
+        }
+
+        // Check authentication when page loads
+        checkAuth();
+    </script>
+</body>
+</html>
