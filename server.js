@@ -1,17 +1,16 @@
 /**
  * BACKEND SERVER FOR SPENSE APP
- *
+ * 
  * This is a Node.js Express server that handles:
  * - User registration
  * - User login
  * - Password hashing (encryption)
  * - JWT authentication tokens
- * - Database storage using PostgreSQL (Railway)
- *
+ * - Database storage using SQLite
+ * 
  * WHAT YOU NEED TO INSTALL:
  * Run these commands in your terminal:
- * npm install express cors bcryptjs jsonwebtoken pg dotenv node-cron
- * npm uninstall @libsql/client better-sqlite3
+ * npm install express cors bcryptjs jsonwebtoken better-sqlite3 dotenv
  */
 
 require('dotenv').config();
@@ -20,7 +19,7 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { Pool } = require('pg');
+const { createClient } = require('@libsql/client');
 const cron = require('node-cron');
 const { sendLoginEmail, sendMonthlySummaryEmail, sendYearlySummaryEmail, sendPasswordResetEmail } = require('./emailService');
 
@@ -34,96 +33,100 @@ const RESET_TOKEN_EXPIRY_MS = RESET_TOKEN_EXPIRY_HOURS * 60 * 60 * 1000;
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key-only';
 
 // Middleware
-app.use(cors());
-app.use(express.json());
+app.use(cors()); // Allow requests from frontend
+app.use(express.json()); // Parse JSON request bodies
 const path = require('path');
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'))); // Serve static files from public folder
 
 /**
  * DATABASE SETUP
- * Using PostgreSQL via Railway.
- * Set DATABASE_URL in your .env locally, Railway injects it automatically in production.
+ * Using SQLite - a simple file-based database
+ * Perfect for learning and small applications
+ * 
+ * NOTE: On Vercel, the filesystem is read-only except /tmp.
+ * We use /tmp/spense.db there. Data won't persist between cold starts.
+ * For persistent data on Vercel, switch to a cloud DB (Turso, Neon, Supabase).
  */
-const db = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+
+// Setup Turso Database Client
+const fallbackDbPath = process.env.VERCEL ? 'file:/tmp/spense.db' : 'file:spense.db';
+const db = createClient({
+    url: process.env.TURSO_DATABASE_URL || fallbackDbPath,
+    authToken: process.env.TURSO_AUTH_TOKEN
 });
 
-// Helper: run a query with positional params
-// Converts libsql-style { sql, args } → pg-style (sql, params)
-// Usage: await query('SELECT * FROM users WHERE id = $1', [id])
-async function query(sql, params) {
-    const res = await db.query(sql, params);
-    return res.rows;
+const dbInitPromise = (async () => {
+// Create users table if it doesn't exist
+await db.executeMultiple(`
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+`);
+
+// Create expenses table
+await db.executeMultiple(`
+    CREATE TABLE IF NOT EXISTS expenses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        amount REAL NOT NULL,
+        category TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'need',
+        mood TEXT DEFAULT '😊',
+        date TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+`);
+
+// Create budgets table
+await db.executeMultiple(`
+    CREATE TABLE IF NOT EXISTS budgets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL UNIQUE,
+        monthly_budget REAL NOT NULL DEFAULT 5000,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+`);
+// Create subscriptions table
+await db.executeMultiple(`
+    CREATE TABLE IF NOT EXISTS subscriptions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        cost REAL NOT NULL,
+        cycle TEXT NOT NULL DEFAULT 'monthly',
+        start_date TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+`);
+
+await db.executeMultiple(`
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        token TEXT NOT NULL UNIQUE,
+        expires_at DATETIME NOT NULL,
+        used INTEGER DEFAULT 0,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+`);
+
+// MIGRATION: Add theme column to users if it doesn't exist
+try {
+    await db.execute("ALTER TABLE users ADD COLUMN theme TEXT DEFAULT 'doodle-light'");
+    console.log('✅ Added theme column to users table');
+} catch (e) {
+    // Column likely already exists
 }
 
-const dbInitPromise = (async () => {
-    // Create users table
-    await db.query(`
-        CREATE TABLE IF NOT EXISTS users (
-            id SERIAL PRIMARY KEY,
-            name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            theme TEXT DEFAULT 'doodle-light',
-            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-        )
-    `);
-
-    // Create expenses table
-    await db.query(`
-        CREATE TABLE IF NOT EXISTS expenses (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER NOT NULL,
-            name TEXT NOT NULL,
-            amount REAL NOT NULL,
-            category TEXT NOT NULL,
-            type TEXT NOT NULL DEFAULT 'need',
-            mood TEXT DEFAULT '😊',
-            date TEXT NOT NULL,
-            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-    `);
-
-    // Create budgets table
-    await db.query(`
-        CREATE TABLE IF NOT EXISTS budgets (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER NOT NULL UNIQUE,
-            monthly_budget REAL NOT NULL DEFAULT 5000,
-            updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-    `);
-
-    // Create subscriptions table
-    await db.query(`
-        CREATE TABLE IF NOT EXISTS subscriptions (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER NOT NULL,
-            name TEXT NOT NULL,
-            cost REAL NOT NULL,
-            cycle TEXT NOT NULL DEFAULT 'monthly',
-            start_date TEXT NOT NULL,
-            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-    `);
-
-    // Create password_reset_tokens table
-    await db.query(`
-        CREATE TABLE IF NOT EXISTS password_reset_tokens (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER NOT NULL,
-            token TEXT NOT NULL UNIQUE,
-            expires_at TIMESTAMPTZ NOT NULL,
-            used INTEGER DEFAULT 0,
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-    `);
-
-    console.log('✅ Database initialized (users, expenses, budgets, subscriptions, reset_tokens tables)');
+console.log('✅ Database initialized (users, expenses, budgets, subscriptions, reset_tokens tables)');
 })();
 
 // Middleware to ensure DB is initialized before handling ANY request
@@ -140,73 +143,112 @@ app.use(async (req, res, next) => {
 /**
  * API ENDPOINT: Register New User
  * POST /api/register
+ * 
+ * WHAT IT DOES:
+ * 1. Receives name, email, password from frontend
+ * 2. Checks if email already exists
+ * 3. Hashes (encrypts) the password for security
+ * 4. Saves user to database
+ * 5. Returns success message
  */
 app.post('/api/register', async (req, res) => {
     try {
         const { name, email, password } = req.body;
 
+        // STEP 1: Validate input
         if (!name || !email || !password) {
-            return res.status(400).json({ message: 'Please provide name, email, and password' });
+            return res.status(400).json({ 
+                message: 'Please provide name, email, and password' 
+            });
         }
 
-        const existing = await query('SELECT * FROM users WHERE email = $1', [email]);
-        if (existing[0]) {
-            return res.status(400).json({ message: 'Email already registered' });
+        // STEP 2: Check if email already exists
+        const existingUser = (await db.execute({ sql: 'SELECT * FROM users WHERE email = ?', args: [email] })).rows[0];
+        
+        if (existingUser) {
+            return res.status(400).json({ 
+                message: 'Email already registered' 
+            });
         }
 
+        // STEP 3: Hash the password
+        // Never store plain passwords! bcrypt creates a secure hash
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        const result = await query(
-            'INSERT INTO users (name, email, password) VALUES ($1, $2, $3) RETURNING id',
-            [name, email, hashedPassword]
-        );
+        // STEP 4: Insert new user into database
+        const result = await db.execute({ sql: `
+            INSERT INTO users (name, email, password) 
+            VALUES (?, ?, ?)
+        `, args: [name, email, hashedPassword] });
 
+        // STEP 5: Return success response
         res.status(201).json({
             message: 'User registered successfully',
-            userId: result[0].id
+            userId: Number(result.lastInsertRowid)
         });
 
         console.log(`✅ New user registered: ${email}`);
 
     } catch (error) {
         console.error('Registration error:', error);
-        res.status(500).json({ message: 'Server error during registration: ' + (error.message || error) });
+        res.status(500).json({ 
+            message: 'Server error during registration: ' + (error.message || error)
+        });
     }
 });
 
 /**
  * API ENDPOINT: Login User
  * POST /api/login
+ * 
+ * WHAT IT DOES:
+ * 1. Receives email and password from frontend
+ * 2. Finds user in database by email
+ * 3. Compares password with hashed password
+ * 4. Creates JWT token for authentication
+ * 5. Returns token and user info
  */
 app.post('/api/login', async (req, res) => {
     try {
         const { email, password } = req.body;
 
+        // STEP 1: Validate input
         if (!email || !password) {
-            return res.status(400).json({ message: 'Please provide email and password' });
+            return res.status(400).json({ 
+                message: 'Please provide email and password' 
+            });
         }
 
-        const users = await query('SELECT * FROM users WHERE email = $1', [email]);
-        const user = users[0];
+        // STEP 2: Find user in database
+        const user = (await db.execute({ sql: 'SELECT * FROM users WHERE email = ?', args: [email] })).rows[0];
 
         if (!user) {
-            return res.status(401).json({ message: 'Invalid email or password' });
+            return res.status(401).json({ 
+                message: 'Invalid email or password' 
+            });
         }
 
+        // STEP 3: Compare password with hashed password
         const isPasswordValid = await bcrypt.compare(password, user.password);
+
         if (!isPasswordValid) {
-            return res.status(401).json({ message: 'Invalid email or password' });
+            return res.status(401).json({ 
+                message: 'Invalid email or password' 
+            });
         }
 
+        // STEP 4: Create JWT token
+        // This token will be used to authenticate future requests
         const token = jwt.sign(
             { userId: user.id, email: user.email },
             JWT_SECRET,
-            { expiresIn: '7d' }
+            { expiresIn: '7d' } // Token expires in 7 days
         );
 
+        // STEP 5: Return success response with token
         res.json({
             message: 'Login successful',
-            token,
+            token: token,
             user: {
                 id: user.id,
                 name: user.name,
@@ -216,40 +258,46 @@ app.post('/api/login', async (req, res) => {
         });
 
         console.log(`✅ User logged in: ${email}`);
+
+        // STEP 6: Send login notification email (non-blocking)
         sendLoginEmail(user.name, user.email).catch(() => {});
 
     } catch (error) {
         console.error('Login error:', error);
-        res.status(500).json({ message: 'Server error during login: ' + (error.message || error) });
+        res.status(500).json({ 
+            message: 'Server error during login: ' + (error.message || error)
+        });
     }
 });
 
 /**
  * API ENDPOINT: Forgot Password
  * POST /api/forgot-password
+ * Generates a reset token and sends a password reset email
  */
 app.post('/api/forgot-password', async (req, res) => {
     try {
         const { email } = req.body;
         if (!email) return res.status(400).json({ message: 'Email is required' });
 
-        const users = await query('SELECT * FROM users WHERE email = $1', [email]);
-        const user = users[0];
+        const user = (await db.execute({ sql: 'SELECT * FROM users WHERE email = ?', args: [email] })).rows[0];
 
+        // Always return success to prevent email enumeration
         if (!user) {
             return res.json({ message: 'If that email is registered, a reset link has been sent.' });
         }
 
+        // Generate a secure random token
         const crypto = require('crypto');
         const token = crypto.randomBytes(32).toString('hex');
-        const expiresAt = new Date(Date.now() + RESET_TOKEN_EXPIRY_MS).toISOString();
+        const expiresAt = new Date(Date.now() + RESET_TOKEN_EXPIRY_MS).toISOString(); // expires in 6 hours
+        await db.execute({ sql: 'DELETE FROM password_reset_tokens WHERE user_id = ?', args: [user.id] });
+        await db.execute({
+            sql: 'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)',
+            args: [user.id, token, expiresAt]
+        });
 
-        await query('DELETE FROM password_reset_tokens WHERE user_id = $1', [user.id]);
-        await query(
-            'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)',
-            [user.id, token, expiresAt]
-        );
-
+        // Send the reset email
         await sendPasswordResetEmail(user.name, user.email, token);
 
         res.json({ message: 'If that email is registered, a reset link has been sent.' });
@@ -264,6 +312,7 @@ app.post('/api/forgot-password', async (req, res) => {
 /**
  * API ENDPOINT: Reset Password
  * POST /api/reset-password
+ * Validates token and updates user password
  */
 app.post('/api/reset-password', async (req, res) => {
     try {
@@ -271,11 +320,11 @@ app.post('/api/reset-password', async (req, res) => {
         if (!token || !password) return res.status(400).json({ message: 'Token and password are required' });
         if (password.length < 6) return res.status(400).json({ message: 'Password must be at least 6 characters' });
 
-        const records = await query(
-            'SELECT * FROM password_reset_tokens WHERE token = $1 AND used = 0',
-            [token]
-        );
-        const resetRecord = records[0];
+        // Find and validate token
+        const resetRecord = (await db.execute({
+            sql: 'SELECT * FROM password_reset_tokens WHERE token = ? AND used = 0',
+            args: [token]
+        })).rows[0];
 
         if (!resetRecord) return res.status(400).json({ message: 'Invalid or expired reset link' });
 
@@ -283,9 +332,12 @@ app.post('/api/reset-password', async (req, res) => {
             return res.status(400).json({ message: 'This reset link has expired. Please request a new one.' });
         }
 
+        // Hash the new password and update user
         const hashedPassword = await bcrypt.hash(password, 10);
-        await query('UPDATE users SET password = $1 WHERE id = $2', [hashedPassword, resetRecord.user_id]);
-        await query('UPDATE password_reset_tokens SET used = 1 WHERE id = $1', [resetRecord.id]);
+        await db.execute({ sql: 'UPDATE users SET password = ? WHERE id = ?', args: [hashedPassword, resetRecord.user_id] });
+
+        // Mark token as used
+        await db.execute({ sql: 'UPDATE password_reset_tokens SET used = 1 WHERE id = ?', args: [resetRecord.id] });
 
         res.json({ message: 'Password updated successfully! You can now log in.' });
         console.log(`✅ Password reset successful for user_id: ${resetRecord.user_id}`);
@@ -299,44 +351,72 @@ app.post('/api/reset-password', async (req, res) => {
 /**
  * API ENDPOINT: Google OAuth Login
  * POST /api/google-login
+ * 
+ * WHAT IT DOES:
+ * 1. Receives Google JWT token from frontend
+ * 2. Verifies token with Google
+ * 3. Extracts user info (email, name) from token
+ * 4. Checks if user exists, creates if not
+ * 5. Returns our JWT token
+ * 
+ * NOTE: To use this, you need to:
+ * - Install: npm install google-auth-library
+ * - Get Google Client ID from https://console.cloud.google.com/
  */
 app.post('/api/google-login', async (req, res) => {
     try {
         const { token: googleToken } = req.body;
 
         if (!googleToken) {
-            return res.status(400).json({ message: 'Google token required' });
+            return res.status(400).json({ 
+                message: 'Google token required' 
+            });
         }
 
+        // NOTE: For production, verify the Google token using google-auth-library
+        // For this tutorial, we'll decode it without verification
+        // IMPORTANT: In production, ALWAYS verify the token!
+        
         try {
+            // Decode the JWT token from Google (base64 decode)
             const parts = googleToken.split('.');
             const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
-            const { email, name } = payload;
+            
+            const { email, name, picture } = payload;
 
             if (!email) {
-                return res.status(400).json({ message: 'Invalid Google token' });
+                return res.status(400).json({ 
+                    message: 'Invalid Google token' 
+                });
             }
 
-            let users = await query('SELECT * FROM users WHERE email = $1', [email]);
-            let user = users[0];
+            // Check if user exists
+            let user = (await db.execute({ sql: 'SELECT * FROM users WHERE email = ?', args: [email] })).rows[0];
 
             if (!user) {
+                // Create new user from Google account
+                // Note: We use a random password since they'll login via Google
                 const randomPassword = await bcrypt.hash(Math.random().toString(36), 10);
-                const result = await query(
-                    'INSERT INTO users (name, email, password) VALUES ($1, $2, $3) RETURNING id',
-                    [name || email.split('@')[0], email, randomPassword]
-                );
-                const newUsers = await query('SELECT * FROM users WHERE id = $1', [result[0].id]);
-                user = newUsers[0];
+                
+                const result = await db.execute({ sql: `
+                    INSERT INTO users (name, email, password) 
+                    VALUES (?, ?, ?)
+                `, args: [name || email.split('@')[0], email, randomPassword] });
+
+                // Fetch the newly created user
+                user = (await db.execute({ sql: 'SELECT * FROM users WHERE id = ?', args: [Number(result.lastInsertRowid)] })).rows[0];
+                
                 console.log(`✅ New user created via Google: ${email}`);
             }
 
+            // Create our JWT token
             const authToken = jwt.sign(
                 { userId: user.id, email: user.email },
                 JWT_SECRET,
                 { expiresIn: '7d' }
             );
 
+            // Return success response
             res.json({
                 message: 'Google login successful',
                 token: authToken,
@@ -351,21 +431,27 @@ app.post('/api/google-login', async (req, res) => {
 
         } catch (decodeError) {
             console.error('Token decode error:', decodeError);
-            return res.status(400).json({ message: 'Invalid Google token format' });
+            return res.status(400).json({ 
+                message: 'Invalid Google token format' 
+            });
         }
 
     } catch (error) {
         console.error('Google login error:', error);
-        res.status(500).json({ message: 'Server error during Google login' });
+        res.status(500).json({ 
+            message: 'Server error during Google login' 
+        });
     }
 });
 
 /**
  * MIDDLEWARE: Verify JWT Token
+ * This function checks if a user is authenticated
+ * Use this to protect routes that require login
  */
 function authenticateToken(req, res, next) {
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+    const token = authHeader && authHeader.split(' ')[1]; // Format: "Bearer TOKEN"
 
     if (!token) {
         return res.status(401).json({ message: 'Access token required' });
@@ -381,16 +467,18 @@ function authenticateToken(req, res, next) {
 }
 
 /**
- * API ENDPOINT: Get User Profile
+ * API ENDPOINT: Get User Profile (Protected)
  * GET /api/profile
+ * 
+ * This is an example of a protected route
+ * User must be logged in (have valid token) to access
  */
 app.get('/api/profile', authenticateToken, async (req, res) => {
     try {
-        const users = await query(
-            'SELECT id, name, email, created_at FROM users WHERE id = $1',
-            [req.user.userId]
-        );
-        const user = users[0];
+        const user = (await db.execute({
+            sql: 'SELECT id, name, email, created_at FROM users WHERE id = ?',
+            args: [req.user.userId]
+        })).rows[0];
 
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
@@ -404,12 +492,14 @@ app.get('/api/profile', authenticateToken, async (req, res) => {
 });
 
 /**
- * API ENDPOINT: Get All Users
+ * API ENDPOINT: Get All Users (for testing/admin)
  * GET /api/users
+ * 
+ * Returns all users (without passwords)
  */
 app.get('/api/users', async (req, res) => {
     try {
-        const users = await query('SELECT id, name, email, created_at FROM users', []);
+        const users = (await db.execute('SELECT id, name, email, created_at FROM users')).rows;
         res.json({ users });
     } catch (error) {
         console.error('Users fetch error:', error);
@@ -426,7 +516,7 @@ app.post('/api/user/theme', authenticateToken, async (req, res) => {
         const { theme } = req.body;
         if (!theme) return res.status(400).json({ message: 'Theme name required' });
 
-        await query('UPDATE users SET theme = $1 WHERE id = $2', [theme, req.user.userId]);
+        await db.execute({ sql: 'UPDATE users SET theme = ? WHERE id = ?', args: [theme, req.user.userId] });
         res.json({ message: 'Theme updated successfully' });
     } catch (error) {
         console.error('Update theme error:', error);
@@ -439,15 +529,20 @@ app.post('/api/user/theme', authenticateToken, async (req, res) => {
 // ============================================================
 
 /**
+ * API ENDPOINT: Get Expenses for a specific date
  * GET /api/expenses?date=YYYY-MM-DD
+ * 
+ * Returns all expenses for the authenticated user on the given date.
+ * If no date is provided, defaults to today.
  */
 app.get('/api/expenses', authenticateToken, async (req, res) => {
     try {
         const date = req.query.date || new Date().toISOString().split('T')[0];
-        const expenses = await query(
-            'SELECT * FROM expenses WHERE user_id = $1 AND date = $2 ORDER BY created_at DESC',
-            [req.user.userId, date]
-        );
+        const expenses = (await db.execute({
+            sql: 'SELECT * FROM expenses WHERE user_id = ? AND date = ? ORDER BY created_at DESC',
+            args: [req.user.userId, date]
+        })).rows;
+
         res.json({ expenses });
     } catch (error) {
         console.error('Fetch expenses error:', error);
@@ -456,6 +551,7 @@ app.get('/api/expenses', authenticateToken, async (req, res) => {
 });
 
 /**
+ * API ENDPOINT: Add a new expense
  * POST /api/expenses
  */
 app.post('/api/expenses', authenticateToken, async (req, res) => {
@@ -468,12 +564,12 @@ app.post('/api/expenses', authenticateToken, async (req, res) => {
 
         const expenseDate = date || new Date().toISOString().split('T')[0];
 
-        const result = await query(
-            'INSERT INTO expenses (user_id, name, amount, category, type, mood, date) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
-            [req.user.userId, name, amount, category, type || 'need', mood || '😊', expenseDate]
-        );
+        const result = await db.execute({ sql: `
+            INSERT INTO expenses (user_id, name, amount, category, type, mood, date)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        `, args: [req.user.userId, name, amount, category, type || 'need', mood || '😊', expenseDate] });
 
-        const newExpense = (await query('SELECT * FROM expenses WHERE id = $1', [result[0].id]))[0];
+        const newExpense = (await db.execute({ sql: 'SELECT * FROM expenses WHERE id = ?', args: [Number(result.lastInsertRowid)] })).rows[0];
 
         console.log(`✅ Expense added: ${name} - ₹${amount} by user ${req.user.userId}`);
         res.status(201).json({ message: 'Expense added', expense: newExpense });
@@ -484,6 +580,7 @@ app.post('/api/expenses', authenticateToken, async (req, res) => {
 });
 
 /**
+ * API ENDPOINT: Update an expense (e.g. toggle need/want)
  * PUT /api/expenses/:id
  */
 app.put('/api/expenses/:id', authenticateToken, async (req, res) => {
@@ -491,26 +588,23 @@ app.put('/api/expenses/:id', authenticateToken, async (req, res) => {
         const { id } = req.params;
         const { name, amount, category, type, mood } = req.body;
 
-        const existing = (await query(
-            'SELECT * FROM expenses WHERE id = $1 AND user_id = $2',
-            [id, req.user.userId]
-        ))[0];
-
+        // Ensure the expense belongs to the user
+        const existing = (await db.execute({ sql: 'SELECT * FROM expenses WHERE id = ? AND user_id = ?', args: [id, req.user.userId] })).rows[0];
         if (!existing) {
             return res.status(404).json({ message: 'Expense not found' });
         }
 
-        await query(`
-            UPDATE expenses SET
-                name = COALESCE($1, name),
-                amount = COALESCE($2, amount),
-                category = COALESCE($3, category),
-                type = COALESCE($4, type),
-                mood = COALESCE($5, mood)
-            WHERE id = $6 AND user_id = $7
-        `, [name || null, amount || null, category || null, type || null, mood || null, id, req.user.userId]);
+        await db.execute({ sql: `
+            UPDATE expenses SET 
+                name = COALESCE(?, name),
+                amount = COALESCE(?, amount),
+                category = COALESCE(?, category),
+                type = COALESCE(?, type),
+                mood = COALESCE(?, mood)
+            WHERE id = ? AND user_id = ?
+        `, args: [name || null, amount || null, category || null, type || null, mood || null, id, req.user.userId] });
 
-        const updated = (await query('SELECT * FROM expenses WHERE id = $1', [id]))[0];
+        const updated = (await db.execute({ sql: 'SELECT * FROM expenses WHERE id = ?', args: [id] })).rows[0];
         res.json({ message: 'Expense updated', expense: updated });
     } catch (error) {
         console.error('Update expense error:', error);
@@ -519,22 +613,19 @@ app.put('/api/expenses/:id', authenticateToken, async (req, res) => {
 });
 
 /**
+ * API ENDPOINT: Delete an expense
  * DELETE /api/expenses/:id
  */
 app.delete('/api/expenses/:id', authenticateToken, async (req, res) => {
     try {
         const { id } = req.params;
 
-        const existing = (await query(
-            'SELECT * FROM expenses WHERE id = $1 AND user_id = $2',
-            [id, req.user.userId]
-        ))[0];
-
+        const existing = (await db.execute({ sql: 'SELECT * FROM expenses WHERE id = ? AND user_id = ?', args: [id, req.user.userId] })).rows[0];
         if (!existing) {
             return res.status(404).json({ message: 'Expense not found' });
         }
 
-        await query('DELETE FROM expenses WHERE id = $1 AND user_id = $2', [id, req.user.userId]);
+        await db.execute({ sql: 'DELETE FROM expenses WHERE id = ? AND user_id = ?', args: [id, req.user.userId] });
 
         console.log(`🗑️ Expense deleted: ID ${id} by user ${req.user.userId}`);
         res.json({ message: 'Expense deleted' });
@@ -549,15 +640,17 @@ app.delete('/api/expenses/:id', authenticateToken, async (req, res) => {
 // ============================================================
 
 /**
+ * API ENDPOINT: Get user's budget
  * GET /api/budget
  */
 app.get('/api/budget', authenticateToken, async (req, res) => {
     try {
-        let budget = (await query('SELECT * FROM budgets WHERE user_id = $1', [req.user.userId]))[0];
+        let budget = (await db.execute({ sql: 'SELECT * FROM budgets WHERE user_id = ?', args: [req.user.userId] })).rows[0];
 
         if (!budget) {
-            await query('INSERT INTO budgets (user_id, monthly_budget) VALUES ($1, 5000)', [req.user.userId]);
-            budget = (await query('SELECT * FROM budgets WHERE user_id = $1', [req.user.userId]))[0];
+            // Create default budget for user
+            await db.execute({ sql: 'INSERT INTO budgets (user_id, monthly_budget) VALUES (?, 5000)', args: [req.user.userId] });
+            budget = (await db.execute({ sql: 'SELECT * FROM budgets WHERE user_id = ?', args: [req.user.userId] })).rows[0];
         }
 
         res.json({ budget });
@@ -568,6 +661,7 @@ app.get('/api/budget', authenticateToken, async (req, res) => {
 });
 
 /**
+ * API ENDPOINT: Update user's budget
  * PUT /api/budget
  */
 app.put('/api/budget', authenticateToken, async (req, res) => {
@@ -578,21 +672,15 @@ app.put('/api/budget', authenticateToken, async (req, res) => {
             return res.status(400).json({ message: 'Valid budget amount is required' });
         }
 
-        const existing = (await query('SELECT * FROM budgets WHERE user_id = $1', [req.user.userId]))[0];
+        const existing = (await db.execute({ sql: 'SELECT * FROM budgets WHERE user_id = ?', args: [req.user.userId] })).rows[0];
 
         if (existing) {
-            await query(
-                'UPDATE budgets SET monthly_budget = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2',
-                [monthlyBudget, req.user.userId]
-            );
+            await db.execute({ sql: 'UPDATE budgets SET monthly_budget = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?', args: [monthly_budget, req.user.userId] });
         } else {
-            await query(
-                'INSERT INTO budgets (user_id, monthly_budget) VALUES ($1, $2)',
-                [req.user.userId, monthlyBudget]
-            );
+            await db.execute({ sql: 'INSERT INTO budgets (user_id, monthly_budget) VALUES (?, ?)', args: [req.user.userId, monthly_budget] });
         }
 
-        const budget = (await query('SELECT * FROM budgets WHERE user_id = $1', [req.user.userId]))[0];
+        const budget = (await db.execute({ sql: 'SELECT * FROM budgets WHERE user_id = ?', args: [req.user.userId] })).rows[0];
         res.json({ message: 'Budget updated', budget });
     } catch (error) {
         console.error('Update budget error:', error);
@@ -605,14 +693,17 @@ app.put('/api/budget', authenticateToken, async (req, res) => {
 // ============================================================
 
 /**
+ * API ENDPOINT: Weekly spending data for chart
  * GET /api/analytics/weekly?date=YYYY-MM-DD
+ * 
+ * Returns spending totals for each day of the current week
  */
 app.get('/api/analytics/weekly', authenticateToken, async (req, res) => {
     try {
         const refDate = req.query.date ? new Date(req.query.date) : new Date();
-        const dayOfWeek = refDate.getDay();
+        const dayOfWeek = refDate.getDay(); // 0 = Sunday
         const monday = new Date(refDate);
-        monday.setDate(refDate.getDate() - ((dayOfWeek + 6) % 7));
+        monday.setDate(refDate.getDate() - ((dayOfWeek + 6) % 7)); // Go back to Monday
 
         const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
         const weeklyData = [];
@@ -622,12 +713,16 @@ app.get('/api/analytics/weekly', authenticateToken, async (req, res) => {
             d.setDate(monday.getDate() + i);
             const dateStr = d.toISOString().split('T')[0];
 
-            const result = (await query(
-                'SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = $1 AND date = $2',
-                [req.user.userId, dateStr]
-            ))[0];
+            const result = (await db.execute({
+                sql: 'SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = ? AND date = ?',
+                args: [req.user.userId, dateStr]
+            })).rows[0];
 
-            weeklyData.push({ day: days[i], date: dateStr, total: result.total });
+            weeklyData.push({
+                day: days[i],
+                date: dateStr,
+                total: result.total
+            });
         }
 
         res.json({ weeklyData });
@@ -638,24 +733,32 @@ app.get('/api/analytics/weekly', authenticateToken, async (req, res) => {
 });
 
 /**
+ * API ENDPOINT: Monthly spending data for chart
  * GET /api/analytics/monthly-chart?date=YYYY-MM-DD
+ * 
+ * Returns spending totals for each day of the current month
  */
 app.get('/api/analytics/monthly-chart', authenticateToken, async (req, res) => {
     try {
         const refDate = req.query.date ? new Date(req.query.date) : new Date();
         const year = refDate.getFullYear();
         const month = refDate.getMonth();
+        
         const daysInMonth = new Date(year, month + 1, 0).getDate();
         const monthlyData = [];
 
         for (let i = 1; i <= daysInMonth; i++) {
             const dateStr = new Date(year, month, i, 12, 0, 0).toISOString().split('T')[0];
-            const result = (await query(
-                'SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = $1 AND date = $2',
-                [req.user.userId, dateStr]
-            ))[0];
+            const result = (await db.execute({
+                sql: 'SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = ? AND date = ?',
+                args: [req.user.userId, dateStr]
+            })).rows[0];
 
-            monthlyData.push({ day: i.toString(), date: dateStr, total: result.total });
+            monthlyData.push({
+                day: i.toString(),
+                date: dateStr,
+                total: result.total
+            });
         }
 
         res.json({ monthlyData });
@@ -666,23 +769,31 @@ app.get('/api/analytics/monthly-chart', authenticateToken, async (req, res) => {
 });
 
 /**
+ * API ENDPOINT: Yearly spending data for chart
  * GET /api/analytics/yearly-chart?date=YYYY-MM-DD
+ * 
+ * Returns spending totals for each month of the current year
  */
 app.get('/api/analytics/yearly-chart', authenticateToken, async (req, res) => {
     try {
         const refDate = req.query.date ? new Date(req.query.date) : new Date();
         const year = refDate.getFullYear();
+        
         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         const yearlyData = [];
 
         for (let i = 0; i < 12; i++) {
             const monthStr = `${year}-${String(i + 1).padStart(2, '0')}`;
-            const result = (await query(
-                "SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = $1 AND date LIKE $2",
-                [req.user.userId, `${monthStr}%`]
-            ))[0];
+            const result = (await db.execute({
+                sql: 'SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = ? AND date LIKE ?',
+                args: [req.user.userId, `${monthStr}%`]
+            })).rows[0];
 
-            yearlyData.push({ day: months[i], date: monthStr, total: result.total });
+            yearlyData.push({
+                day: months[i],
+                date: monthStr,
+                total: result.total
+            });
         }
 
         res.json({ yearlyData });
@@ -693,13 +804,14 @@ app.get('/api/analytics/yearly-chart', authenticateToken, async (req, res) => {
 });
 
 /**
+ * API ENDPOINT: Category breakdown for pie/donut charts
  * GET /api/analytics/category-breakdown?timeframe=weekly|monthly|yearly&date=YYYY-MM-DD
  */
 app.get('/api/analytics/category-breakdown', authenticateToken, async (req, res) => {
     try {
         const { timeframe, date } = req.query;
         const refDate = date ? new Date(date) : new Date();
-        let sql = '';
+        let query = '';
         let params = [req.user.userId];
 
         if (timeframe === 'weekly') {
@@ -710,24 +822,25 @@ app.get('/api/analytics/category-breakdown', authenticateToken, async (req, res)
             const sunday = new Date(monday);
             sunday.setDate(monday.getDate() + 6);
             const rangeEnd = sunday.toISOString().split('T')[0];
-            sql = 'SELECT category as label, SUM(amount) as total FROM expenses WHERE user_id = $1 AND date BETWEEN $2 AND $3 GROUP BY category';
+            query = 'SELECT category as label, SUM(amount) as total FROM expenses WHERE user_id = ? AND date BETWEEN ? AND ? GROUP BY category';
             params.push(rangeStart, rangeEnd);
         } else if (timeframe === 'monthly') {
             const month = refDate.toISOString().slice(0, 7);
-            sql = "SELECT category as label, SUM(amount) as total FROM expenses WHERE user_id = $1 AND date LIKE $2 GROUP BY category";
+            query = 'SELECT category as label, SUM(amount) as total FROM expenses WHERE user_id = ? AND date LIKE ? GROUP BY category';
             params.push(`${month}%`);
         } else {
             const year = refDate.getFullYear();
-            sql = "SELECT category as label, SUM(amount) as total FROM expenses WHERE user_id = $1 AND date LIKE $2 GROUP BY category";
+            query = 'SELECT category as label, SUM(amount) as total FROM expenses WHERE user_id = ? AND date LIKE ? GROUP BY category';
             params.push(`${year}%`);
         }
 
-        let breakdown = await query(sql, params);
+        let breakdown = (await db.execute({ sql: query, args: params })).rows;
 
-        const subs = await query('SELECT cost, cycle FROM subscriptions WHERE user_id = $1', [req.user.userId]);
+        // Normalize subscriptions to monthly equivalent
+        const subs = (await db.execute({ sql: 'SELECT cost, cycle FROM subscriptions WHERE user_id = ?', args: [req.user.userId] })).rows;
         let monthlySubTotal = 0;
         subs.forEach(s => {
-            if (s.cycle === 'yearly') monthlySubTotal += s.cost / 12;
+            if(s.cycle === 'yearly') monthlySubTotal += s.cost / 12;
             else monthlySubTotal += s.cost;
         });
 
@@ -735,6 +848,7 @@ app.get('/api/analytics/category-breakdown', authenticateToken, async (req, res)
             let normalizedSubTotal = monthlySubTotal;
             if (timeframe === 'weekly') normalizedSubTotal = monthlySubTotal / 4;
             else if (timeframe === 'yearly') normalizedSubTotal = monthlySubTotal * 12;
+            
             breakdown.push({ label: 'Subscriptions', total: normalizedSubTotal });
         }
 
@@ -746,43 +860,47 @@ app.get('/api/analytics/category-breakdown', authenticateToken, async (req, res)
 });
 
 /**
+ * API ENDPOINT: Monthly summary
  * GET /api/analytics/monthly?month=YYYY-MM
+ * 
+ * Returns total spent, needs vs wants breakdown for the month
  */
 app.get('/api/analytics/monthly', authenticateToken, async (req, res) => {
     try {
         const month = req.query.month || new Date().toISOString().slice(0, 7);
 
-        const totalSpent = (await query(
-            "SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = $1 AND date LIKE $2",
-            [req.user.userId, `${month}%`]
-        ))[0];
+        const totalSpent = (await db.execute({
+            sql: "SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = ? AND date LIKE ?",
+            args: [req.user.userId, `${month}%`]
+        })).rows[0];
 
-        const needsTotal = (await query(
-            "SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = $1 AND date LIKE $2 AND type = 'need'",
-            [req.user.userId, `${month}%`]
-        ))[0];
+        const needsTotal = (await db.execute({
+            sql: "SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = ? AND date LIKE ? AND type = 'need'",
+            args: [req.user.userId, `${month}%`]
+        })).rows[0];
 
-        const wantsTotal = (await query(
-            "SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = $1 AND date LIKE $2 AND type = 'want'",
-            [req.user.userId, `${month}%`]
-        ))[0];
+        const wantsTotal = (await db.execute({
+            sql: "SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = ? AND date LIKE ? AND type = 'want'",
+            args: [req.user.userId, `${month}%`]
+        })).rows[0];
 
-        const trackingDays = (await query(
-            "SELECT COUNT(DISTINCT date) as days FROM expenses WHERE user_id = $1 AND date LIKE $2",
-            [req.user.userId, `${month}%`]
-        ))[0];
+        const trackingDays = (await db.execute({
+            sql: "SELECT COUNT(DISTINCT date) as days FROM expenses WHERE user_id = ? AND date LIKE ?",
+            args: [req.user.userId, `${month}%`]
+        })).rows[0];
 
-        const subs = await query('SELECT cost, cycle FROM subscriptions WHERE user_id = $1', [req.user.userId]);
+        // Calculate normalized subscriptions
+        const subs = (await db.execute({ sql: 'SELECT cost, cycle FROM subscriptions WHERE user_id = ?', args: [req.user.userId] })).rows;
         let subTotal = 0;
         subs.forEach(s => {
-            if (s.cycle === 'yearly') subTotal += s.cost / 12;
+            if(s.cycle === 'yearly') subTotal += s.cost / 12;
             else subTotal += s.cost;
         });
 
         res.json({
             month,
             totalSpent: totalSpent.total + subTotal,
-            needsTotal: needsTotal.total + subTotal,
+            needsTotal: needsTotal.total + subTotal, // Subscriptions are considered 'Needs'
             wantsTotal: wantsTotal.total,
             trackingDays: trackingDays.days
         });
@@ -793,10 +911,14 @@ app.get('/api/analytics/monthly', authenticateToken, async (req, res) => {
 });
 
 /**
+ * API ENDPOINT: Spending streak
  * GET /api/analytics/streak
+ * 
+ * Returns the number of consecutive days the user has logged at least one expense
  */
 app.get('/api/analytics/streak', authenticateToken, async (req, res) => {
     try {
+        // Count consecutive days (backwards from today) with at least 1 expense
         let streak = 0;
         const today = new Date();
 
@@ -805,16 +927,17 @@ app.get('/api/analytics/streak', authenticateToken, async (req, res) => {
             d.setDate(today.getDate() - i);
             const dateStr = d.toISOString().split('T')[0];
 
-            const result = (await query(
-                'SELECT COUNT(*) as count FROM expenses WHERE user_id = $1 AND date = $2',
-                [req.user.userId, dateStr]
-            ))[0];
+            const result = (await db.execute({
+                sql: 'SELECT COUNT(*) as count FROM expenses WHERE user_id = ? AND date = ?',
+                args: [req.user.userId, dateStr]
+            })).rows[0];
 
             if (result.count > 0) {
                 streak++;
             } else {
                 if (i === 0) {
-                    continue;
+                    // haven't logged *today* yet, don't break the streak from yesterday
+                    continue; 
                 } else {
                     break;
                 }
@@ -828,16 +951,14 @@ app.get('/api/analytics/streak', authenticateToken, async (req, res) => {
     }
 });
 
-// ============================================================
-// SUBSCRIPTIONS ENDPOINTS
-// ============================================================
+/**
+ * SUBSCRIPTIONS API
+ */
 
+// Get all subscriptions
 app.get('/api/subscriptions', authenticateToken, async (req, res) => {
     try {
-        const subs = await query(
-            'SELECT * FROM subscriptions WHERE user_id = $1 ORDER BY start_date ASC',
-            [req.user.userId]
-        );
+        const subs = (await db.execute({ sql: 'SELECT * FROM subscriptions WHERE user_id = ? ORDER BY start_date ASC', args: [req.user.userId] })).rows;
         res.json(subs);
     } catch (error) {
         console.error('Fetch subscriptions error:', error);
@@ -845,6 +966,7 @@ app.get('/api/subscriptions', authenticateToken, async (req, res) => {
     }
 });
 
+// Add new subscription
 app.post('/api/subscriptions', authenticateToken, async (req, res) => {
     try {
         const { name, cost, cycle, start_date } = req.body;
@@ -852,31 +974,27 @@ app.post('/api/subscriptions', authenticateToken, async (req, res) => {
             return res.status(400).json({ message: 'Invalid subscription data' });
         }
 
-        const result = await query(
-            'INSERT INTO subscriptions (user_id, name, cost, cycle, start_date) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-            [req.user.userId, name, Number(cost), cycle, start_date]
-        );
+        const result = await db.execute({ sql: `
+            INSERT INTO subscriptions (user_id, name, cost, cycle, start_date)
+            VALUES (?, ?, ?, ?, ?)
+        `, args: [req.user.userId, name, Number(cost), cycle, start_date] });
 
-        res.status(201).json({ message: 'Subscription added successfully', id: result[0].id });
+        res.status(201).json({ message: 'Subscription added successfully', id: Number(result.lastInsertRowid) });
     } catch (error) {
         console.error('Add subscription error:', error);
         res.status(500).json({ message: 'Server error saving subscription' });
     }
 });
 
+// Delete subscription
 app.delete('/api/subscriptions/:id', authenticateToken, async (req, res) => {
     try {
         const { id } = req.params;
-        const existing = (await query(
-            'SELECT * FROM subscriptions WHERE id = $1 AND user_id = $2',
-            [id, req.user.userId]
-        ))[0];
-
-        if (!existing) {
+        const result = await db.execute({ sql: 'DELETE FROM subscriptions WHERE id = ? AND user_id = ?', args: [id, req.user.userId] });
+        
+        if (result.rowsAffected === 0) {
             return res.status(404).json({ message: 'Subscription not found or unauthorized' });
         }
-
-        await query('DELETE FROM subscriptions WHERE id = $1 AND user_id = $2', [id, req.user.userId]);
         res.json({ message: 'Subscription deleted successfully' });
     } catch (error) {
         console.error('Delete subscription error:', error);
@@ -884,16 +1002,19 @@ app.delete('/api/subscriptions/:id', authenticateToken, async (req, res) => {
     }
 });
 
-// ============================================================
-// START SERVER
-// ============================================================
-app.listen(PORT, () => {
-    console.log(`
+/**
+ * START SERVER
+ * On Vercel, the app is exported as a serverless function — no listen() needed.
+ * Locally, we call listen() as usual.
+ */
+if (!process.env.VERCEL) {
+    app.listen(PORT, () => {
+        console.log(`
 🚀 Spense Backend Server Running!
 📍 Server: http://localhost:${PORT}
-📊 Database: PostgreSQL (Railway)
+📊 Database: Turso Sqlite (or fallback)
 🌐 Dashboard: http://localhost:${PORT}/dashboard.html
-
+    
 API Endpoints:
 ✉️  POST   /api/register          - Register new user
 🔐 POST   /api/login             - Login user
@@ -910,16 +1031,20 @@ API Endpoints:
 🔥 GET    /api/analytics/streak  - Spending streak
 
 Press Ctrl+C to stop the server
-    `);
-});
+        `);
+    });
+}
 
+// Export for Vercel serverless
 module.exports = app;
 
 // ─── CRON JOB: Monthly Summary ────────────────────────────────────────────────
+// Runs at 9:00 AM IST on the 1st of every month
+// IST = UTC+5:30, so 9:00 IST = 03:30 UTC
 cron.schedule('30 3 1 * *', async () => {
     console.log('📅 Running monthly summary email job...');
 
-    const users = await query('SELECT id, name, email FROM users', []);
+    const users = (await db.execute('SELECT id, name, email FROM users')).rows;
 
     for (const user of users) {
         try {
@@ -927,22 +1052,26 @@ cron.schedule('30 3 1 * *', async () => {
             const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
             const ym = `${prevMonth.getFullYear()}-${String(prevMonth.getMonth() + 1).padStart(2, '0')}`;
 
-            const totalRow = (await query(`
+            // Total spent last month
+            const totalRow = (await db.execute({ sql: `
                 SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as cnt
                 FROM expenses
-                WHERE user_id = $1 AND date LIKE $2
-            `, [user.id, `${ym}%`]))[0];
+                WHERE user_id = ? AND strftime('%Y-%m', date) = ?
+            `, args: [user.id, ym] })).rows[0];
 
-            const budgetRow = (await query('SELECT monthly_budget FROM budgets WHERE user_id = $1', [user.id]))[0];
+            // Budget
+            const budgetRow = (await db.execute({ sql: 'SELECT monthly_budget FROM budgets WHERE user_id = ?', args: [user.id] })).rows[0];
 
-            const categories = (await query(`
+            // Top category
+            const categories = (await db.execute({ sql: `
                 SELECT category as label, SUM(amount) as total
                 FROM expenses
-                WHERE user_id = $1 AND date LIKE $2
+                WHERE user_id = ? AND strftime('%Y-%m', date) = ?
                 GROUP BY category ORDER BY total DESC LIMIT 1
-            `, [user.id, `${ym}%`]))[0];
+            `, args: [user.id, ym] })).rows[0];
 
-            const subs = await query('SELECT cost, cycle FROM subscriptions WHERE user_id = $1', [user.id]);
+            // Subscription normalized monthly cost
+            const subs = (await db.execute({ sql: 'SELECT cost, cycle FROM subscriptions WHERE user_id = ?', args: [user.id] })).rows;
             const subMonthly = subs.reduce((acc, s) => acc + (s.cycle === 'yearly' ? s.cost / 12 : s.cost), 0);
 
             const totalSpent = (totalRow.total || 0) + subMonthly;
@@ -963,35 +1092,40 @@ cron.schedule('30 3 1 * *', async () => {
 }, { timezone: 'Asia/Kolkata' });
 
 // ─── CRON JOB: Yearly Summary ─────────────────────────────────────────────────
+// Runs at 9:00 AM IST on January 1st every year
 cron.schedule('30 3 1 1 *', async () => {
     console.log('🎉 Running yearly summary email job...');
 
-    const users = await query('SELECT id, name, email FROM users', []);
+    const users = (await db.execute('SELECT id, name, email FROM users')).rows;
     const prevYear = new Date().getFullYear() - 1;
 
     for (const user of users) {
         try {
-            const totalRow = (await query(`
+            // Total spent in the previous year
+            const totalRow = (await db.execute({ sql: `
                 SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as cnt
                 FROM expenses
-                WHERE user_id = $1 AND date LIKE $2
-            `, [user.id, `${prevYear}%`]))[0];
+                WHERE user_id = ? AND strftime('%Y', date) = ?
+            `, args: [user.id, String(prevYear)] })).rows[0];
 
+            // Average monthly spend
             const avgMonthly = Math.round((totalRow.total || 0) / 12);
 
-            const topCat = (await query(`
+            // Top category for the year
+            const topCat = (await db.execute({ sql: `
                 SELECT category as label, SUM(amount) as total
                 FROM expenses
-                WHERE user_id = $1 AND date LIKE $2
+                WHERE user_id = ? AND strftime('%Y', date) = ?
                 GROUP BY category ORDER BY total DESC LIMIT 1
-            `, [user.id, `${prevYear}%`]))[0];
+            `, args: [user.id, String(prevYear)] })).rows[0];
 
-            const monthlyRows = (await query(`
-                SELECT TO_CHAR(TO_DATE(date, 'YYYY-MM-DD'), 'YYYY-MM') as ym, SUM(amount) as total
+            // Best month (lowest spending, only months with data)
+            const monthlyRows = (await db.execute({ sql: `
+                SELECT strftime('%Y-%m', date) as ym, SUM(amount) as total
                 FROM expenses
-                WHERE user_id = $1 AND date LIKE $2
+                WHERE user_id = ? AND strftime('%Y', date) = ?
                 GROUP BY ym ORDER BY total ASC LIMIT 1
-            `, [user.id, `${prevYear}%`]))[0];
+            `, args: [user.id, String(prevYear)] })).rows[0];
 
             let bestMonth = null;
             if (monthlyRows) {
@@ -1015,8 +1149,8 @@ cron.schedule('30 3 1 1 *', async () => {
 console.log('⏰ Email cron jobs scheduled (monthly: 1st of month 9AM IST, yearly: Jan 1st 9AM IST)');
 
 // Graceful shutdown
-process.on('SIGINT', async () => {
-    await db.end();
+process.on('SIGINT', () => {
+    db.close();
     console.log('\n👋 Server stopped');
     process.exit(0);
 });
