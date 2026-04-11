@@ -190,7 +190,7 @@ app.post('/api/register', async (req, res) => {
     } catch (error) {
         console.error('Registration error:', error);
         res.status(500).json({ 
-            message: 'Server error during registration' 
+            message: 'Server error during registration: ' + (error.message || error)
         });
     }
 });
@@ -263,7 +263,7 @@ app.post('/api/login', async (req, res) => {
     } catch (error) {
         console.error('Login error:', error);
         res.status(500).json({ 
-            message: 'Server error during login' 
+            message: 'Server error during login: ' + (error.message || error)
         });
     }
 });
@@ -1000,7 +1000,7 @@ if (!process.env.VERCEL) {
         console.log(`
 🚀 Spense Backend Server Running!
 📍 Server: http://localhost:${PORT}
-📊 Database: ${DB_PATH}
+📊 Database: Turso Sqlite (or fallback)
 🌐 Dashboard: http://localhost:${PORT}/dashboard.html
     
 API Endpoints:
