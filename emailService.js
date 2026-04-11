@@ -12,6 +12,7 @@
  */
 
 require('dotenv').config();
+const Brevo = require('@getbrevo/brevo');
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 // Values are now pulled from the .env file
@@ -20,36 +21,29 @@ const BREVO_API_KEY = process.env.BREVO_API_KEY?.trim();
 const APP_URL = process.env.APP_URL || 'http://localhost:3000';
 const RESET_LINK_EXPIRY_HOURS = Number(process.env.RESET_TOKEN_EXPIRY_HOURS) || 6;
 const RESET_LINK_EXPIRY_TEXT = RESET_LINK_EXPIRY_HOURS === 1 ? '1 hour' : `${RESET_LINK_EXPIRY_HOURS} hours`;
+const brevo = new Brevo({ apiKey: BREVO_API_KEY });
 // ──────────────────────────────────────────────────────────────────────────────
 
 if (!BREVO_API_KEY) {
   console.warn('⚠️  BREVO_API_KEY is missing. Set it in your .env or Railway Variables.');
 }
 
-console.log('✅ Email service loaded: Brevo API mode');
+console.log('✅ Email service loaded: Brevo SDK mode');
 
 async function sendMail({ to, subject, html }) {
   if (!BREVO_API_KEY) {
     throw new Error('Missing BREVO_API_KEY for email sending');
   }
 
-  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
-    method: 'POST',
-    headers: {
-      'api-key': BREVO_API_KEY,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      sender: { name: 'Spense', email: EMAIL_FROM },
-      to: [{ email: to }],
-      subject,
-      htmlContent: html
-    })
+  const result = await brevo.sendTransacEmail({
+    sender: { name: 'Spense', email: EMAIL_FROM },
+    to: [{ email: to }],
+    subject,
+    htmlContent: html
   });
 
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Brevo API error (${response.status}): ${err}`);
+  if (!result || result.messageId == null) {
+    throw new Error(`Brevo SDK error: invalid response`);
   }
 }
 
