@@ -17,28 +17,26 @@ const nodemailer = require('nodemailer');
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 // Values are now pulled from the .env file
-const EMAIL_USER = process.env.EMAIL_USER;
-const EMAIL_FROM = process.env.EMAIL_FROM || EMAIL_USER;
-const EMAIL_PASS = process.env.EMAIL_PASS;
+const EMAIL_FROM = process.env.EMAIL_FROM || 'no-reply@spense.app';
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 const APP_URL = process.env.APP_URL || 'http://localhost:3000';
 const RESET_LINK_EXPIRY_HOURS = Number(process.env.RESET_TOKEN_EXPIRY_HOURS) || 6;
 const RESET_LINK_EXPIRY_TEXT = RESET_LINK_EXPIRY_HOURS === 1 ? '1 hour' : `${RESET_LINK_EXPIRY_HOURS} hours`;
-const USE_SENDGRID_SMTP = Boolean(SENDGRID_API_KEY);
 // ──────────────────────────────────────────────────────────────────────────────
 
-if (!EMAIL_USER && !SENDGRID_API_KEY) {
-  console.warn('⚠️  Email credentials are missing. Set EMAIL_USER/EMAIL_PASS or SENDGRID_API_KEY in your .env file.');
+if (!SENDGRID_API_KEY) {
+  console.warn('⚠️  SendGrid API key is missing. Set SENDGRID_API_KEY in your .env file.');
 }
 
 const transporter = nodemailer.createTransport({
-  host: USE_SENDGRID_SMTP ? 'smtp.sendgrid.net' : 'smtp.gmail.com',
+  host: 'smtp.sendgrid.net',
   port: 587,
   secure: false,
-  requireTLS: !USE_SENDGRID_SMTP,
-  auth: USE_SENDGRID_SMTP
-    ? { user: 'apikey', pass: SENDGRID_API_KEY }
-    : { user: EMAIL_USER, pass: EMAIL_PASS },
+  requireTLS: true,
+  auth: {
+    user: 'apikey',
+    pass: SENDGRID_API_KEY
+  },
   tls: {
     rejectUnauthorized: false
   },
@@ -50,13 +48,9 @@ const transporter = nodemailer.createTransport({
 // Verify connection on startup
 transporter.verify((err) => {
   if (err) {
-    if (USE_SENDGRID) {
-      console.log('ℹ️  SMTP verify failed, but SendGrid is configured. Using SendGrid API instead.');
-    } else {
-      console.warn(`⚠️  Email service not configured: ${err.message}`);
-    }
+    console.warn(`⚠️  SendGrid SMTP connection failed: ${err.message}`);
   } else {
-    console.log('✅ Email service ready');
+    console.log('✅ Email service ready via SendGrid SMTP');
   }
 });
 
