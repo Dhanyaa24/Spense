@@ -47,12 +47,13 @@ app.use(express.static(path.join(__dirname, 'public'))); // Serve static files f
  */
 
 // Setup Turso Database Client
+const fallbackDbPath = process.env.VERCEL ? 'file:/tmp/spense.db' : 'file:spense.db';
 const db = createClient({
-    url: process.env.TURSO_DATABASE_URL || 'file:spense.db',
+    url: process.env.TURSO_DATABASE_URL || fallbackDbPath,
     authToken: process.env.TURSO_AUTH_TOKEN
 });
 
-(async () => {
+const dbInitPromise = (async () => {
 // Create users table if it doesn't exist
 await db.executeMultiple(`
     CREATE TABLE IF NOT EXISTS users (
@@ -125,6 +126,17 @@ try {
 
 console.log('✅ Database initialized (users, expenses, budgets, subscriptions, reset_tokens tables)');
 })();
+
+// Middleware to ensure DB is initialized before handling ANY request
+app.use(async (req, res, next) => {
+    try {
+        await dbInitPromise;
+        next();
+    } catch (err) {
+        console.error("Database initialization failed:", err);
+        res.status(500).json({ message: "Database initialization failed" });
+    }
+});
 
 /**
  * API ENDPOINT: Register New User
