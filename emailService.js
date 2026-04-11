@@ -20,7 +20,13 @@ const nodemailer = require('nodemailer');
 const EMAIL_USER = process.env.EMAIL_USER;
 const EMAIL_PASS = process.env.EMAIL_PASS;
 const APP_URL = process.env.APP_URL || 'http://localhost:3000';
+const RESET_LINK_EXPIRY_HOURS = Number(process.env.RESET_TOKEN_EXPIRY_HOURS) || 6;
+const RESET_LINK_EXPIRY_TEXT = RESET_LINK_EXPIRY_HOURS === 1 ? '1 hour' : `${RESET_LINK_EXPIRY_HOURS} hours`;
 // ──────────────────────────────────────────────────────────────────────────────
+
+if (!EMAIL_USER || !EMAIL_PASS) {
+  console.warn('⚠️  Email credentials are missing. Set EMAIL_USER and EMAIL_PASS in your .env file.');
+}
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -33,7 +39,7 @@ const transporter = nodemailer.createTransport({
 // Verify connection on startup
 transporter.verify((err) => {
   if (err) {
-    console.warn('⚠️  Email service not configured. Update EMAIL_USER and EMAIL_PASS in emailService.js');
+    console.warn(`⚠️  Email service not configured: ${err.message}`);
   } else {
     console.log('✅ Email service ready');
   }
@@ -283,7 +289,7 @@ async function sendPasswordResetEmail(userName, userEmail, resetToken) {
         </div>
 
         <div style="background:#FFFAF2;border:1px solid #F6EAD4;border-radius:12px;padding:16px 20px;margin-bottom:20px;">
-            <p style="margin:0;font-size:0.82rem;color:#818263;font-weight:600;">Link expires in 1 hour</p>
+            <p style="margin:0;font-size:0.82rem;color:#818263;font-weight:600;">Link expires in ${RESET_LINK_EXPIRY_TEXT}</p>
             <p style="margin:6px 0 0;font-size:0.82rem;color:#5a5a5a;">If the button doesn't work, copy this link:<br>
               <span style="color:#818263;word-break:break-all;">${resetLink}</span>
             </p>
@@ -303,7 +309,11 @@ async function sendPasswordResetEmail(userName, userEmail, resetToken) {
     });
     console.log(`📧 Password reset email sent to ${userEmail}`);
   } catch (err) {
-    console.warn(`⚠️  Could not send reset email: ${err.message}`);
+    console.error(`❌ Could not send reset email to ${userEmail}: ${err.message}`);
+    if (err.response) {
+      console.error('Email SMTP response:', err.response);
+    }
+    throw err;
   }
 }
 
