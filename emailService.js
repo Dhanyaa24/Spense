@@ -19,6 +19,7 @@ const nodemailer = require('nodemailer');
 // Values are now pulled from the .env file
 const EMAIL_USER = process.env.EMAIL_USER;
 const EMAIL_PASS = process.env.EMAIL_PASS;
+const APP_URL = process.env.APP_URL || 'http://localhost:3000';
 // ──────────────────────────────────────────────────────────────────────────────
 
 const transporter = nodemailer.createTransport({
@@ -109,7 +110,7 @@ async function sendLoginEmail(userName, userEmail) {
         </p>
 
         <div style="text-align:center;margin:28px 0;">
-            <a href="http://localhost:3000/dashboard.html"
+            <a href="${APP_URL}/dashboard.html"
                style="background:#818263;color:white;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:600;font-size:0.95rem;display:inline-block;">
                Open Dashboard →
             </a>
@@ -183,7 +184,7 @@ async function sendMonthlySummaryEmail(user, summaryData) {
         </div>` : ''}
 
         <div style="text-align:center;margin:28px 0;">
-            <a href="http://localhost:3000/dashboard.html"
+            <a href="${APP_URL}/dashboard.html"
                style="background:#818263;color:white;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:600;font-size:0.95rem;display:inline-block;">
                View Full Dashboard →
             </a>
@@ -244,7 +245,7 @@ async function sendYearlySummaryEmail(user, summaryData) {
         </div>` : ''}
 
         <div style="text-align:center;margin:28px 0;">
-            <a href="http://localhost:3000/dashboard.html"
+            <a href="${APP_URL}/dashboard.html"
                style="background:#818263;color:white;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:600;font-size:0.95rem;display:inline-block;">
                Explore Your Dashboard →
             </a>
@@ -266,7 +267,7 @@ async function sendYearlySummaryEmail(user, summaryData) {
 
 // ─── EMAIL: PASSWORD RESET ─────────────────────────────────────────────────────
 async function sendPasswordResetEmail(userName, userEmail, resetToken) {
-  const resetLink = `http://localhost:3000/reset-password.html?token=${resetToken}`;
+  const resetLink = `${APP_URL}/reset-password.html?token=${resetToken}`;
 
   const content = `
         <h2 style="color:#818263;font-size:1.6rem;font-style:italic;margin:0 0 8px;">Reset your password</h2>
