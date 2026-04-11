@@ -18,25 +18,27 @@ const nodemailer = require('nodemailer');
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 // Values are now pulled from the .env file
 const EMAIL_USER = process.env.EMAIL_USER;
+const EMAIL_FROM = process.env.EMAIL_FROM || EMAIL_USER;
 const EMAIL_PASS = process.env.EMAIL_PASS;
+const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 const APP_URL = process.env.APP_URL || 'http://localhost:3000';
 const RESET_LINK_EXPIRY_HOURS = Number(process.env.RESET_TOKEN_EXPIRY_HOURS) || 6;
 const RESET_LINK_EXPIRY_TEXT = RESET_LINK_EXPIRY_HOURS === 1 ? '1 hour' : `${RESET_LINK_EXPIRY_HOURS} hours`;
+const USE_SENDGRID_SMTP = Boolean(SENDGRID_API_KEY);
 // ──────────────────────────────────────────────────────────────────────────────
 
-if (!EMAIL_USER || !EMAIL_PASS) {
-  console.warn('⚠️  Email credentials are missing. Set EMAIL_USER and EMAIL_PASS in your .env file.');
+if (!EMAIL_USER && !SENDGRID_API_KEY) {
+  console.warn('⚠️  Email credentials are missing. Set EMAIL_USER/EMAIL_PASS or SENDGRID_API_KEY in your .env file.');
 }
 
 const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
+  host: USE_SENDGRID_SMTP ? 'smtp.sendgrid.net' : 'smtp.gmail.com',
   port: 587,
   secure: false,
-  requireTLS: true,
-  auth: {
-    user: EMAIL_USER,
-    pass: EMAIL_PASS
-  },
+  requireTLS: !USE_SENDGRID_SMTP,
+  auth: USE_SENDGRID_SMTP
+    ? { user: 'apikey', pass: SENDGRID_API_KEY }
+    : { user: EMAIL_USER, pass: EMAIL_PASS },
   tls: {
     rejectUnauthorized: false
   },
@@ -48,11 +50,24 @@ const transporter = nodemailer.createTransport({
 // Verify connection on startup
 transporter.verify((err) => {
   if (err) {
-    console.warn(`⚠️  Email service not configured: ${err.message}`);
+    if (USE_SENDGRID) {
+      console.log('ℹ️  SMTP verify failed, but SendGrid is configured. Using SendGrid API instead.');
+    } else {
+      console.warn(`⚠️  Email service not configured: ${err.message}`);
+    }
   } else {
     console.log('✅ Email service ready');
   }
 });
+
+async function sendMail({ to, subject, html }) {
+  return transporter.sendMail({
+    from: `"Spense" <${EMAIL_FROM}>`,
+    to,
+    subject,
+    html
+  });
+}
 
 // ─── SHARED STYLES ────────────────────────────────────────────────────────────
 const emailBase = (content) => `
@@ -137,8 +152,7 @@ async function sendLoginEmail(userName, userEmail) {
     `;
 
   try {
-    await transporter.sendMail({
-      from: `"Spense" <${EMAIL_USER}>`,
+    await sendMail({
       to: userEmail,
       subject: `Hey ${userName}, you just logged in to Spense 👋`,
       html: emailBase(content)
@@ -207,8 +221,7 @@ async function sendMonthlySummaryEmail(user, summaryData) {
     `;
 
   try {
-    await transporter.sendMail({
-      from: `"Spense" <${EMAIL_USER}>`,
+    await sendMail({
       to: user.email,
       subject: `Your ${monthName} spending summary is ready 📊`,
       html: emailBase(content)
@@ -268,8 +281,7 @@ async function sendYearlySummaryEmail(user, summaryData) {
     `;
 
   try {
-    await transporter.sendMail({
-      from: `"Spense" <${EMAIL_USER}>`,
+    await sendMail({
       to: user.email,
       subject: `Your ${year} Spense Year in Review ✨`,
       html: emailBase(content)
@@ -310,8 +322,7 @@ async function sendPasswordResetEmail(userName, userEmail, resetToken) {
     `;
 
   try {
-    await transporter.sendMail({
-      from: `"Spense" <${EMAIL_USER}>`,
+    await sendMail({
       to: userEmail,
       subject: `Reset your Spense password`,
       html: emailBase(content)
@@ -320,7 +331,7 @@ async function sendPasswordResetEmail(userName, userEmail, resetToken) {
   } catch (err) {
     console.error(`❌ Could not send reset email to ${userEmail}: ${err.message}`);
     if (err.response) {
-      console.error('Email SMTP response:', err.response);
+      console.error('Email response:', err.response);
     }
     throw err;
   }
