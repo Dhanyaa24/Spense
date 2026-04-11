@@ -292,9 +292,10 @@ app.post('/api/forgot-password', async (req, res) => {
 
         // Remove any existing tokens for this user, then store new one
         await db.execute({ sql: 'DELETE FROM password_reset_tokens WHERE user_id = ?', args: [user.id] });
-        db.prepare(
-            'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)'
-        ).run(user.id, token, expiresAt);
+        await db.execute({
+            sql: 'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)',
+            args: [user.id, token, expiresAt]
+        });
 
         // Send the reset email
         await sendPasswordResetEmail(user.name, user.email, token);
@@ -320,9 +321,10 @@ app.post('/api/reset-password', async (req, res) => {
         if (password.length < 6) return res.status(400).json({ message: 'Password must be at least 6 characters' });
 
         // Find and validate token
-        const resetRecord = db.prepare(
-            'SELECT * FROM password_reset_tokens WHERE token = ? AND used = 0'
-        ).get(token);
+        const resetRecord = (await db.execute({
+            sql: 'SELECT * FROM password_reset_tokens WHERE token = ? AND used = 0',
+            args: [token]
+        })).rows[0];
 
         if (!resetRecord) return res.status(400).json({ message: 'Invalid or expired reset link' });
 
@@ -473,8 +475,10 @@ function authenticateToken(req, res, next) {
  */
 app.get('/api/profile', authenticateToken, async (req, res) => {
     try {
-        const user = db.prepare('SELECT id, name, email, created_at FROM users WHERE id = ?')
-            .get(req.user.userId);
+        const user = (await db.execute({
+            sql: 'SELECT id, name, email, created_at FROM users WHERE id = ?',
+            args: [req.user.userId]
+        })).rows[0];
 
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
@@ -534,14 +538,15 @@ app.post('/api/user/theme', authenticateToken, async (req, res) => {
 app.get('/api/expenses', authenticateToken, async (req, res) => {
     try {
         const date = req.query.date || new Date().toISOString().split('T')[0];
-        const expenses = db.prepare(
-            'SELECT * FROM expenses WHERE user_id = ? AND date = ? ORDER BY created_at DESC'
-        ).all(req.user.userId, date);
+        const expenses = (await db.execute({
+            sql: 'SELECT * FROM expenses WHERE user_id = ? AND date = ? ORDER BY created_at DESC',
+            args: [req.user.userId, date]
+        })).rows;
 
         res.json({ expenses });
     } catch (error) {
         console.error('Fetch expenses error:', error);
-        res.status(500).json({ message: 'Server error fetching expenses' });
+        res.status(500).json({ message: 'Server error fetching expenses: ' + (error.message || error) });
     }
 });
 
@@ -670,8 +675,7 @@ app.put('/api/budget', authenticateToken, async (req, res) => {
         const existing = (await db.execute({ sql: 'SELECT * FROM budgets WHERE user_id = ?', args: [req.user.userId] })).rows[0];
 
         if (existing) {
-            db.prepare('UPDATE budgets SET monthly_budget = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?')
-                .run(monthly_budget, req.user.userId);
+            await db.execute({ sql: 'UPDATE budgets SET monthly_budget = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?', args: [monthly_budget, req.user.userId] });
         } else {
             await db.execute({ sql: 'INSERT INTO budgets (user_id, monthly_budget) VALUES (?, ?)', args: [req.user.userId, monthly_budget] });
         }
@@ -709,9 +713,10 @@ app.get('/api/analytics/weekly', authenticateToken, async (req, res) => {
             d.setDate(monday.getDate() + i);
             const dateStr = d.toISOString().split('T')[0];
 
-            const result = db.prepare(
-                'SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = ? AND date = ?'
-            ).get(req.user.userId, dateStr);
+            const result = (await db.execute({
+                sql: 'SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = ? AND date = ?',
+                args: [req.user.userId, dateStr]
+            })).rows[0];
 
             weeklyData.push({
                 day: days[i],
@@ -744,9 +749,10 @@ app.get('/api/analytics/monthly-chart', authenticateToken, async (req, res) => {
 
         for (let i = 1; i <= daysInMonth; i++) {
             const dateStr = new Date(year, month, i, 12, 0, 0).toISOString().split('T')[0];
-            const result = db.prepare(
-                'SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = ? AND date = ?'
-            ).get(req.user.userId, dateStr);
+            const result = (await db.execute({
+                sql: 'SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = ? AND date = ?',
+                args: [req.user.userId, dateStr]
+            })).rows[0];
 
             monthlyData.push({
                 day: i.toString(),
@@ -778,9 +784,10 @@ app.get('/api/analytics/yearly-chart', authenticateToken, async (req, res) => {
 
         for (let i = 0; i < 12; i++) {
             const monthStr = `${year}-${String(i + 1).padStart(2, '0')}`;
-            const result = db.prepare(
-                'SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = ? AND date LIKE ?'
-            ).get(req.user.userId, `${monthStr}%`);
+            const result = (await db.execute({
+                sql: 'SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = ? AND date LIKE ?',
+                args: [req.user.userId, `${monthStr}%`]
+            })).rows[0];
 
             yearlyData.push({
                 day: months[i],
@@ -827,7 +834,7 @@ app.get('/api/analytics/category-breakdown', authenticateToken, async (req, res)
             params.push(`${year}%`);
         }
 
-        let breakdown = db.prepare(query).all(...params);
+        let breakdown = (await db.execute({ sql: query, args: params })).rows;
 
         // Normalize subscriptions to monthly equivalent
         const subs = (await db.execute({ sql: 'SELECT cost, cycle FROM subscriptions WHERE user_id = ?', args: [req.user.userId] })).rows;
@@ -862,21 +869,25 @@ app.get('/api/analytics/monthly', authenticateToken, async (req, res) => {
     try {
         const month = req.query.month || new Date().toISOString().slice(0, 7);
 
-        const totalSpent = db.prepare(
-            "SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = ? AND date LIKE ?"
-        ).get(req.user.userId, `${month}%`);
+        const totalSpent = (await db.execute({
+            sql: "SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = ? AND date LIKE ?",
+            args: [req.user.userId, `${month}%`]
+        })).rows[0];
 
-        const needsTotal = db.prepare(
-            "SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = ? AND date LIKE ? AND type = 'need'"
-        ).get(req.user.userId, `${month}%`);
+        const needsTotal = (await db.execute({
+            sql: "SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = ? AND date LIKE ? AND type = 'need'",
+            args: [req.user.userId, `${month}%`]
+        })).rows[0];
 
-        const wantsTotal = db.prepare(
-            "SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = ? AND date LIKE ? AND type = 'want'"
-        ).get(req.user.userId, `${month}%`);
+        const wantsTotal = (await db.execute({
+            sql: "SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = ? AND date LIKE ? AND type = 'want'",
+            args: [req.user.userId, `${month}%`]
+        })).rows[0];
 
-        const trackingDays = db.prepare(
-            "SELECT COUNT(DISTINCT date) as days FROM expenses WHERE user_id = ? AND date LIKE ?"
-        ).get(req.user.userId, `${month}%`);
+        const trackingDays = (await db.execute({
+            sql: "SELECT COUNT(DISTINCT date) as days FROM expenses WHERE user_id = ? AND date LIKE ?",
+            args: [req.user.userId, `${month}%`]
+        })).rows[0];
 
         // Calculate normalized subscriptions
         const subs = (await db.execute({ sql: 'SELECT cost, cycle FROM subscriptions WHERE user_id = ?', args: [req.user.userId] })).rows;
@@ -916,9 +927,10 @@ app.get('/api/analytics/streak', authenticateToken, async (req, res) => {
             d.setDate(today.getDate() - i);
             const dateStr = d.toISOString().split('T')[0];
 
-            const result = db.prepare(
-                'SELECT COUNT(*) as count FROM expenses WHERE user_id = ? AND date = ?'
-            ).get(req.user.userId, dateStr);
+            const result = (await db.execute({
+                sql: 'SELECT COUNT(*) as count FROM expenses WHERE user_id = ? AND date = ?',
+                args: [req.user.userId, dateStr]
+            })).rows[0];
 
             if (result.count > 0) {
                 streak++;
