@@ -13,12 +13,11 @@
  */
 
 require('dotenv').config();
-const nodemailer = require('nodemailer');
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 // Values are now pulled from the .env file
 const EMAIL_FROM = process.env.EMAIL_FROM || 'no-reply@spense.app';
-const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
+const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY?.trim();
 const APP_URL = process.env.APP_URL || 'http://localhost:3000';
 const RESET_LINK_EXPIRY_HOURS = Number(process.env.RESET_TOKEN_EXPIRY_HOURS) || 6;
 const RESET_LINK_EXPIRY_TEXT = RESET_LINK_EXPIRY_HOURS === 1 ? '1 hour' : `${RESET_LINK_EXPIRY_HOURS} hours`;
@@ -28,39 +27,31 @@ if (!SENDGRID_API_KEY) {
   console.warn('⚠️  SendGrid API key is missing. Set SENDGRID_API_KEY in your .env file.');
 }
 
-const transporter = nodemailer.createTransport({
-  host: 'smtp.sendgrid.net',
-  port: 587,
-  secure: false,
-  requireTLS: true,
-  auth: {
-    user: 'apikey',
-    pass: SENDGRID_API_KEY
-  },
-  tls: {
-    rejectUnauthorized: false
-  },
-  connectionTimeout: 10000,
-  socketTimeout: 10000,
-  family: 4
-});
-
-// Verify connection on startup
-transporter.verify((err) => {
-  if (err) {
-    console.warn(`⚠️  SendGrid SMTP connection failed: ${err.message}`);
-  } else {
-    console.log('✅ Email service ready via SendGrid SMTP');
-  }
-});
-
 async function sendMail({ to, subject, html }) {
-  return transporter.sendMail({
-    from: `"Spense" <${EMAIL_FROM}>`,
-    to,
-    subject,
-    html
+  if (!SENDGRID_API_KEY) {
+    throw new Error('Missing SENDGRID_API_KEY for email sending');
+  }
+
+  const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${SENDGRID_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      personalizations: [{ to: [{ email: to }] }],
+      from: { email: EMAIL_FROM, name: 'Spense' },
+      subject,
+      content: [{ type: 'text/html', value: html }]
+    })
   });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    const message = `SendGrid API error (${response.status}): ${errorBody}`;
+    console.error(`❌ SendGrid error sending email to ${to}: ${message}`);
+    throw new Error(message);
+  }
 }
 
 // ─── SHARED STYLES ────────────────────────────────────────────────────────────
