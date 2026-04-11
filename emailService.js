@@ -6,51 +6,37 @@
  * - Yearly spending summaries
  *
  * SETUP:
- *   Uses Gmail's SMTP. To get started:
- *   1. Go to your Google account → Security → App passwords
- *   2. Generate an App Password (not your normal Gmail password!)
- *   3. Replace EMAIL_USER and EMAIL_PASS below
+ *   Uses Resend for email delivery.
+ *   1. Create a Resend account
+ *   2. Set RESEND_API_KEY in your environment
  */
 
 require('dotenv').config();
+const { Resend } = require('resend');
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 // Values are now pulled from the .env file
-const EMAIL_FROM = process.env.EMAIL_FROM || 'no-reply@spense.app';
-const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY?.trim();
+const resend = new Resend(process.env.RESEND_API_KEY);
+const EMAIL_FROM = process.env.EMAIL_FROM || 'onboarding@resend.dev';
 const APP_URL = process.env.APP_URL || 'http://localhost:3000';
 const RESET_LINK_EXPIRY_HOURS = Number(process.env.RESET_TOKEN_EXPIRY_HOURS) || 6;
 const RESET_LINK_EXPIRY_TEXT = RESET_LINK_EXPIRY_HOURS === 1 ? '1 hour' : `${RESET_LINK_EXPIRY_HOURS} hours`;
 // ──────────────────────────────────────────────────────────────────────────────
 
-if (!SENDGRID_API_KEY) {
-  console.warn('⚠️  SendGrid API key is missing. Set SENDGRID_API_KEY in your .env file.');
+if (!process.env.RESEND_API_KEY) {
+  console.warn('⚠️  RESEND_API_KEY is missing. Set it in your .env or Railway Variables.');
 }
 
 async function sendMail({ to, subject, html }) {
-  if (!SENDGRID_API_KEY) {
-    throw new Error('Missing SENDGRID_API_KEY for email sending');
-  }
-
-  const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${SENDGRID_API_KEY}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      personalizations: [{ to: [{ email: to }] }],
-      from: { email: EMAIL_FROM, name: 'Spense' },
-      subject,
-      content: [{ type: 'text/html', value: html }]
-    })
+  const { error } = await resend.emails.send({
+    from: `Spense <${EMAIL_FROM}>`,
+    to,
+    subject,
+    html
   });
 
-  if (!response.ok) {
-    const errorBody = await response.text();
-    const message = `SendGrid API error (${response.status}): ${errorBody}`;
-    console.error(`❌ SendGrid error sending email to ${to}: ${message}`);
-    throw new Error(message);
+  if (error) {
+    throw new Error(`Resend error: ${error.message}`);
   }
 }
 
