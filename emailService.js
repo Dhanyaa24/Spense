@@ -6,37 +6,52 @@
  * - Yearly spending summaries
  *
  * SETUP:
- *   Uses Resend for email delivery.
- *   1. Create a Resend account
- *   2. Set RESEND_API_KEY in your environment
+ *   Uses Brevo for email delivery.
+ *   1. Create a Brevo account
+ *   2. Set BREVO_API_KEY in your environment
  */
 
 require('dotenv').config();
-const { Resend } = require('resend');
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 // Values are now pulled from the .env file
-const resend = new Resend(process.env.RESEND_API_KEY);
-const EMAIL_FROM = process.env.EMAIL_FROM || 'onboarding@resend.dev';
+const EMAIL_FROM = process.env.EMAIL_FROM || 'no-reply@spense.app';
+const BREVO_API_KEY = process.env.BREVO_API_KEY?.trim();
 const APP_URL = process.env.APP_URL || 'http://localhost:3000';
 const RESET_LINK_EXPIRY_HOURS = Number(process.env.RESET_TOKEN_EXPIRY_HOURS) || 6;
 const RESET_LINK_EXPIRY_TEXT = RESET_LINK_EXPIRY_HOURS === 1 ? '1 hour' : `${RESET_LINK_EXPIRY_HOURS} hours`;
 // ──────────────────────────────────────────────────────────────────────────────
 
-if (!process.env.RESEND_API_KEY) {
-  console.warn('⚠️  RESEND_API_KEY is missing. Set it in your .env or Railway Variables.');
+if (!BREVO_API_KEY) {
+  console.warn('⚠️  BREVO_API_KEY is missing. Set it in your .env or Railway Variables.');
 }
 
+console.log('✅ Email service loaded: Brevo API mode');
+
 async function sendMail({ to, subject, html }) {
-  const { error } = await resend.emails.send({
-    from: `Spense <${EMAIL_FROM}>`,
-    to,
-    subject,
-    html
+  if (!BREVO_API_KEY) {
+    throw new Error('Missing BREVO_API_KEY for email sending');
+  }
+
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${BREVO_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      sender: { email: EMAIL_FROM, name: 'Spense' },
+      to: [{ email: to }],
+      subject,
+      htmlContent: html
+    })
   });
 
-  if (error) {
-    throw new Error(`Resend error: ${error.message}`);
+  if (!response.ok) {
+    const errorBody = await response.text();
+    const message = `Brevo API error (${response.status}): ${errorBody}`;
+    console.error(`❌ Brevo error sending email to ${to}: ${message}`);
+    throw new Error(message);
   }
 }
 
