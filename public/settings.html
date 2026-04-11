@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spense - App Settings</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="theme.js"></script>
+    <style>
+        :root {
+            --savory-sage: #818263;
+            --avocado-smoothie: #C2C395;
+            --blush-beet: #DDBAAE;
+            --peach-protein: #EFD7CF;
+            --oat-latte: #DCD4C1;
+            --honey-oatmilk: #F6EAD4;
+            --coconut-cream: #FFFAF2;
+            --dark-text: #2d2d2d;
+            --light-text: #5a5a5a;
+            --want-red: #EF5350;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--coconut-cream);
+            color: var(--dark-text);
+            min-height: 100vh;
+        }
+
+        /* Ambient background */
+        body::before {
+            content: '';
+            position: fixed;
+            top: -20%;
+            right: -10%;
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, var(--peach-protein) 0%, transparent 70%);
+            opacity: 0.35;
+            z-index: 0;
+            animation: floatBg 20s ease-in-out infinite;
+        }
+        body::after {
+            content: '';
+            position: fixed;
+            bottom: -20%;
+            left: -10%;
+            width: 500px;
+            height: 500px;
+            background: radial-gradient(circle, var(--avocado-smoothie) 0%, transparent 70%);
+            opacity: 0.2;
+            z-index: 0;
+            animation: floatBg 25s ease-in-out infinite reverse;
+        }
+        @keyframes floatBg {
+            0%, 100% { transform: translate(0, 0); }
+            50% { transform: translate(30px, 30px); }
+        }
+
+        /* Top Navigation */
+        .top-nav {
+            background: rgba(255, 250, 242, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 10px rgba(129, 130, 99, 0.08);
+            border-bottom: 1px solid var(--honey-oatmilk);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .nav-logo {
+            font-family: 'DM Serif Display', serif;
+            font-size: 1.5rem;
+            font-style: italic;
+            color: var(--savory-sage);
+            font-weight: 400;
+        }
+        .nav-right {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        .profile-icon {
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--savory-sage) 0%, #6d6e52 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 1.2rem;
+        }
+
+        /* Settings Container */
+        .settings-container {
+            position: relative;
+            z-index: 1;
+            max-width: 800px;
+            margin: 3rem auto;
+            background: rgba(255, 250, 242, 0.92);
+            border: 1px solid var(--honey-oatmilk);
+            border-radius: 20px;
+            box-shadow: 0 4px 20px rgba(129, 130, 99, 0.08);
+            padding: 3rem;
+        }
+
+        .settings-title {
+            font-family: 'DM Serif Display', serif;
+            font-size: 2.5rem;
+            color: var(--savory-sage);
+            margin-bottom: 2rem;
+            text-align: center;
+            font-style: italic;
+        }
+
+        .setting-section {
+            margin-bottom: 2.5rem;
+            padding-bottom: 1.5rem;
+            border-bottom: 1px dashed var(--honey-oatmilk);
+        }
+        .setting-section:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .section-header {
+            font-weight: 700;
+            color: var(--savory-sage);
+            font-size: 1.2rem;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .setting-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            background: var(--coconut-cream);
+            padding: 1rem 1.2rem;
+            border-radius: 12px;
+            border: 1px solid rgba(129, 130, 99, 0.15);
+        }
+        
+        .setting-info h4 {
+            font-weight: 600;
+            color: var(--dark-text);
+            margin-bottom: 0.2rem;
+        }
+        .setting-info p {
+            font-size: 0.85rem;
+            color: var(--light-text);
+        }
+
+        /* Toggle Switch */
+        .toggle-switch {
+            position: relative;
+            width: 50px;
+            height: 26px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider {
+            background-color: var(--savory-sage);
+        }
+        input:checked + .slider:before {
+            transform: translateX(24px);
+        }
+
+        /* Select styling */
+        .theme-select {
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            border: 2px solid var(--honey-oatmilk);
+            background: var(--coconut-cream);
+            font-family: inherit;
+            font-size: 0.95rem;
+            cursor: pointer;
+            outline: none;
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="top-nav">
+        <div class="nav-logo">Spense</div>
+        <div class="nav-right">
+            <div class="profile-icon" id="profileIcon" onclick="openProfile()">S</div>
+            <!-- Profile Dropdown -->
+            <div id="profileDropdown" style="display:none;position:absolute;right:0;top:55px;background:var(--coconut-cream);border:1px solid var(--honey-oatmilk);border-radius:12px;box-shadow:0 8px 30px rgba(129,130,99,0.15);padding:0.5rem;min-width:220px;z-index:200;display:none;flex-direction:column;gap:0.2rem;">
+                <div style="padding:0.8rem;border-bottom:1px solid var(--honey-oatmilk);margin-bottom:0.5rem;">
+                    <div style="font-weight:600;color:var(--savory-sage);font-size:1.1rem;" id="profileName">User</div>
+                    <div style="font-size:0.8rem;color:var(--light-text);" id="profileEmail">user@email.com</div>
+                </div>
+                <a href="home.html" style="padding:0.6rem 0.8rem; text-decoration:none; color:var(--dark-text); font-weight:500; border-radius:8px; transition:0.2s; display:flex; align-items:center; gap:0.5rem;" onmouseover="this.style.background='var(--honey-oatmilk)'" onmouseout="this.style.background='transparent'">Home</a>
+                <a href="dashboard.html" style="padding:0.6rem 0.8rem; text-decoration:none; color:var(--dark-text); font-weight:500; border-radius:8px; transition:0.2s; display:flex; align-items:center; gap:0.5rem;" onmouseover="this.style.background='var(--honey-oatmilk)'" onmouseout="this.style.background='transparent'">Dashboard</a>
+                <a href="track.html" style="padding:0.6rem 0.8rem; text-decoration:none; color:var(--dark-text); font-weight:500; border-radius:8px; transition:0.2s; display:flex; align-items:center; gap:0.5rem;" onmouseover="this.style.background='var(--honey-oatmilk)'" onmouseout="this.style.background='transparent'">Expenses</a>
+                <a href="profile_settings.html" style="padding:0.6rem 0.8rem; text-decoration:none; color:var(--dark-text); font-weight:500; border-radius:8px; transition:0.2s; display:flex; align-items:center; gap:0.5rem;" onmouseover="this.style.background='var(--honey-oatmilk)'" onmouseout="this.style.background='transparent'">Profile Settings</a>
+                <a href="settings.html" style="padding:0.6rem 0.8rem; text-decoration:none; color:var(--dark-text); font-weight:500; border-radius:8px; transition:0.2s; display:flex; align-items:center; gap:0.5rem; background:var(--honey-oatmilk);">Settings</a>
+                <button onclick="logout()" style="width:100%;padding:0.6rem;margin-top:0.5rem;background:var(--want-red);color:white;border:none;border-radius:8px;cursor:pointer;font-family:inherit;font-weight:600;transition:0.2s;">Logout</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="settings-container">
+        <h2 class="settings-title">App Settings</h2>
+
+        <div class="setting-section">
+            <div class="section-header">🎨 Appearance / Theme</div>
+            
+            <div class="setting-item">
+                <div class="setting-info">
+                    <h4>Color Palette</h4>
+                    <p>Choose the look and feel of Spense</p>
+                </div>
+                <select class="theme-select" id="themeSelect" onchange="applyGlobalTheme(this.value)">
+                    <option value="doodle-light">Doodle Light (Default)</option>
+                    <option value="doodle-dark">Doodle Dark</option>
+                    <option value="peach-glow">Peach Glow</option>
+                    <option value="sage-minimal">Sage Minimalist</option>
+                </select>
+            </div>
+
+            <div class="setting-item">
+                <div class="setting-info">
+                    <h4>Animations</h4>
+                    <p>Enable fluid background and illustration animations</p>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+
+        <div class="setting-section">
+            <div class="section-header">🔔 Notifications</div>
+            
+            <div class="setting-item">
+                <div class="setting-info">
+                    <h4>Daily Reminder</h4>
+                    <p>Remind me to track expenses every evening</p>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="setting-item">
+                <div class="setting-info">
+                    <h4>Budget Alerts</h4>
+                    <p>Send an alert when I reach 80% of my budget</p>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+
+        <div class="setting-section">
+            <div class="section-header">🔒 Privacy</div>
+            
+            <div class="setting-item">
+                <div class="setting-info">
+                    <h4>Hide Balances</h4>
+                    <p>Blur out numbers on the dashboard when idle</p>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            
+            <button style="margin-top:1rem; padding:0.8rem 1.5rem; border-radius:10px; border:2px solid var(--want-red); background:transparent; color:var(--want-red); font-weight:600; cursor:pointer; font-family:inherit; transition:0.3s;" onmouseover="this.style.background='var(--want-red)'; this.style.color='white'" onmouseout="this.style.background='transparent'; this.style.color='var(--want-red)'" onclick="alert('Factory reset initiated! (Just kidding, this is a demo)')">Reset All Data</button>
+        </div>
+    </div>
+
+    <script>
+        function getUser() {
+            try { return JSON.parse(localStorage.getItem('user')); } catch { return null; }
+        }
+
+        function initData() {
+            const user = getUser();
+            if(user) {
+                document.getElementById('profileName').textContent = user.name || 'User';
+                document.getElementById('profileEmail').textContent = user.email || '';
+                
+                const extras = JSON.parse(localStorage.getItem('user_extras_' + user.email)) || {};
+                const profileIcon = document.getElementById('profileIcon');
+                if(extras.photo) {
+                    profileIcon.innerHTML = `<img src="${extras.photo}" style="width:100%; height:100%; object-fit:cover; border-radius:50%;" alt="Profile">`;
+                    profileIcon.style.background = 'transparent';
+                } else {
+                    const initial = user.name ? user.name.charAt(0).toUpperCase() : 'U';
+                    profileIcon.textContent = initial;
+                }
+            }
+            
+            const savedTheme = localStorage.getItem('spense_theme');
+            if(savedTheme) {
+                document.getElementById('themeSelect').value = savedTheme;
+            }
+        }
+
+        function openProfile() {
+            const dd = document.getElementById('profileDropdown');
+            dd.style.display = dd.style.display === 'flex' ? 'none' : 'flex';
+        }
+
+        function logout() {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            window.location.href = 'login.html';
+        }
+
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.nav-right')) {
+                document.getElementById('profileDropdown').style.display = 'none';
+            }
+        });
+
+        function applyTheme(theme) {
+            applyGlobalTheme(theme);
+        }
+
+        window.onload = () => {
+            initData();
+            const savedTheme = localStorage.getItem('spense_theme');
+            if(savedTheme) applyTheme(savedTheme);
+        };
+    </script>
+</body>
+</html>
