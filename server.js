@@ -19,7 +19,7 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const Database = require('better-sqlite3');
+const { createClient } = require('@libsql/client');
 const cron = require('node-cron');
 const { sendLoginEmail, sendMonthlySummaryEmail, sendYearlySummaryEmail, sendPasswordResetEmail } = require('./emailService');
 
@@ -45,13 +45,15 @@ app.use(express.static('public')); // Serve static files from public folder
  * For persistent data on Vercel, switch to a cloud DB (Turso, Neon, Supabase).
  */
 
-// Create/open database file — use /tmp on Vercel (serverless read-only fs)
-const path = require('path');
-const DB_PATH = process.env.VERCEL ? '/tmp/spense.db' : path.join(__dirname, 'spense.db');
-const db = new Database(DB_PATH);
+// Setup Turso Database Client
+const db = createClient({
+    url: process.env.TURSO_DATABASE_URL || 'file:spense.db',
+    authToken: process.env.TURSO_AUTH_TOKEN
+});
 
+(async () => {
 // Create users table if it doesn't exist
-db.exec(`
+await db.executeMultiple(`
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
@@ -62,7 +64,7 @@ db.exec(`
 `);
 
 // Create expenses table
-db.exec(`
+await db.executeMultiple(`
     CREATE TABLE IF NOT EXISTS expenses (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
@@ -78,7 +80,7 @@ db.exec(`
 `);
 
 // Create budgets table
-db.exec(`
+await db.executeMultiple(`
     CREATE TABLE IF NOT EXISTS budgets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL UNIQUE,
@@ -88,7 +90,7 @@ db.exec(`
     )
 `);
 // Create subscriptions table
-db.exec(`
+await db.executeMultiple(`
     CREATE TABLE IF NOT EXISTS subscriptions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
@@ -101,7 +103,7 @@ db.exec(`
     )
 `);
 
-db.exec(`
+await db.executeMultiple(`
     CREATE TABLE IF NOT EXISTS password_reset_tokens (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
@@ -114,13 +116,14 @@ db.exec(`
 
 // MIGRATION: Add theme column to users if it doesn't exist
 try {
-    db.prepare("ALTER TABLE users ADD COLUMN theme TEXT DEFAULT 'doodle-light'").run();
+    await db.execute("ALTER TABLE users ADD COLUMN theme TEXT DEFAULT 'doodle-light'");
     console.log('✅ Added theme column to users table');
 } catch (e) {
     // Column likely already exists
 }
 
 console.log('✅ Database initialized (users, expenses, budgets, subscriptions, reset_tokens tables)');
+})();
 
 /**
  * API ENDPOINT: Register New User
@@ -145,7 +148,7 @@ app.post('/api/register', async (req, res) => {
         }
 
         // STEP 2: Check if email already exists
-        const existingUser = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+        const existingUser = (await db.execute({ sql: 'SELECT * FROM users WHERE email = ?', args: [email] })).rows[0];
         
         if (existingUser) {
             return res.status(400).json({ 
@@ -158,15 +161,15 @@ app.post('/api/register', async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, 10);
 
         // STEP 4: Insert new user into database
-        const result = db.prepare(`
+        const result = await db.execute({ sql: `
             INSERT INTO users (name, email, password) 
             VALUES (?, ?, ?)
-        `).run(name, email, hashedPassword);
+        `, args: [name, email, hashedPassword] });
 
         // STEP 5: Return success response
         res.status(201).json({
             message: 'User registered successfully',
-            userId: result.lastInsertRowid
+            userId: Number(result.lastInsertRowid)
         });
 
         console.log(`✅ New user registered: ${email}`);
@@ -202,7 +205,7 @@ app.post('/api/login', async (req, res) => {
         }
 
         // STEP 2: Find user in database
-        const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+        const user = (await db.execute({ sql: 'SELECT * FROM users WHERE email = ?', args: [email] })).rows[0];
 
         if (!user) {
             return res.status(401).json({ 
@@ -262,7 +265,7 @@ app.post('/api/forgot-password', async (req, res) => {
         const { email } = req.body;
         if (!email) return res.status(400).json({ message: 'Email is required' });
 
-        const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+        const user = (await db.execute({ sql: 'SELECT * FROM users WHERE email = ?', args: [email] })).rows[0];
 
         // Always return success to prevent email enumeration
         if (!user) {
@@ -275,7 +278,7 @@ app.post('/api/forgot-password', async (req, res) => {
         const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
 
         // Remove any existing tokens for this user, then store new one
-        db.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(user.id);
+        await db.execute({ sql: 'DELETE FROM password_reset_tokens WHERE user_id = ?', args: [user.id] });
         db.prepare(
             'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)'
         ).run(user.id, token, expiresAt);
@@ -316,10 +319,10 @@ app.post('/api/reset-password', async (req, res) => {
 
         // Hash the new password and update user
         const hashedPassword = await bcrypt.hash(password, 10);
-        db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashedPassword, resetRecord.user_id);
+        await db.execute({ sql: 'UPDATE users SET password = ? WHERE id = ?', args: [hashedPassword, resetRecord.user_id] });
 
         // Mark token as used
-        db.prepare('UPDATE password_reset_tokens SET used = 1 WHERE id = ?').run(resetRecord.id);
+        await db.execute({ sql: 'UPDATE password_reset_tokens SET used = 1 WHERE id = ?', args: [resetRecord.id] });
 
         res.json({ message: 'Password updated successfully! You can now log in.' });
         console.log(`✅ Password reset successful for user_id: ${resetRecord.user_id}`);
@@ -373,20 +376,20 @@ app.post('/api/google-login', async (req, res) => {
             }
 
             // Check if user exists
-            let user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+            let user = (await db.execute({ sql: 'SELECT * FROM users WHERE email = ?', args: [email] })).rows[0];
 
             if (!user) {
                 // Create new user from Google account
                 // Note: We use a random password since they'll login via Google
                 const randomPassword = await bcrypt.hash(Math.random().toString(36), 10);
                 
-                const result = db.prepare(`
+                const result = await db.execute({ sql: `
                     INSERT INTO users (name, email, password) 
                     VALUES (?, ?, ?)
-                `).run(name || email.split('@')[0], email, randomPassword);
+                `, args: [name || email.split('@')[0], email, randomPassword] });
 
                 // Fetch the newly created user
-                user = db.prepare('SELECT * FROM users WHERE id = ?').get(result.lastInsertRowid);
+                user = (await db.execute({ sql: 'SELECT * FROM users WHERE id = ?', args: [Number(result.lastInsertRowid)] })).rows[0];
                 
                 console.log(`✅ New user created via Google: ${email}`);
             }
@@ -455,7 +458,7 @@ function authenticateToken(req, res, next) {
  * This is an example of a protected route
  * User must be logged in (have valid token) to access
  */
-app.get('/api/profile', authenticateToken, (req, res) => {
+app.get('/api/profile', authenticateToken, async (req, res) => {
     try {
         const user = db.prepare('SELECT id, name, email, created_at FROM users WHERE id = ?')
             .get(req.user.userId);
@@ -477,9 +480,9 @@ app.get('/api/profile', authenticateToken, (req, res) => {
  * 
  * Returns all users (without passwords)
  */
-app.get('/api/users', (req, res) => {
+app.get('/api/users', async (req, res) => {
     try {
-        const users = db.prepare('SELECT id, name, email, created_at FROM users').all();
+        const users = (await db.execute('SELECT id, name, email, created_at FROM users')).rows;
         res.json({ users });
     } catch (error) {
         console.error('Users fetch error:', error);
@@ -491,12 +494,12 @@ app.get('/api/users', (req, res) => {
  * API ENDPOINT: Update User Theme
  * POST /api/user/theme
  */
-app.post('/api/user/theme', authenticateToken, (req, res) => {
+app.post('/api/user/theme', authenticateToken, async (req, res) => {
     try {
         const { theme } = req.body;
         if (!theme) return res.status(400).json({ message: 'Theme name required' });
 
-        db.prepare('UPDATE users SET theme = ? WHERE id = ?').run(theme, req.user.userId);
+        await db.execute({ sql: 'UPDATE users SET theme = ? WHERE id = ?', args: [theme, req.user.userId] });
         res.json({ message: 'Theme updated successfully' });
     } catch (error) {
         console.error('Update theme error:', error);
@@ -515,7 +518,7 @@ app.post('/api/user/theme', authenticateToken, (req, res) => {
  * Returns all expenses for the authenticated user on the given date.
  * If no date is provided, defaults to today.
  */
-app.get('/api/expenses', authenticateToken, (req, res) => {
+app.get('/api/expenses', authenticateToken, async (req, res) => {
     try {
         const date = req.query.date || new Date().toISOString().split('T')[0];
         const expenses = db.prepare(
@@ -533,7 +536,7 @@ app.get('/api/expenses', authenticateToken, (req, res) => {
  * API ENDPOINT: Add a new expense
  * POST /api/expenses
  */
-app.post('/api/expenses', authenticateToken, (req, res) => {
+app.post('/api/expenses', authenticateToken, async (req, res) => {
     try {
         const { name, amount, category, type, mood, date } = req.body;
 
@@ -543,12 +546,12 @@ app.post('/api/expenses', authenticateToken, (req, res) => {
 
         const expenseDate = date || new Date().toISOString().split('T')[0];
 
-        const result = db.prepare(`
+        const result = await db.execute({ sql: `
             INSERT INTO expenses (user_id, name, amount, category, type, mood, date)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).run(req.user.userId, name, amount, category, type || 'need', mood || '😊', expenseDate);
+        `, args: [req.user.userId, name, amount, category, type || 'need', mood || '😊', expenseDate] });
 
-        const newExpense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(result.lastInsertRowid);
+        const newExpense = (await db.execute({ sql: 'SELECT * FROM expenses WHERE id = ?', args: [Number(result.lastInsertRowid)] })).rows[0];
 
         console.log(`✅ Expense added: ${name} - ₹${amount} by user ${req.user.userId}`);
         res.status(201).json({ message: 'Expense added', expense: newExpense });
@@ -562,18 +565,18 @@ app.post('/api/expenses', authenticateToken, (req, res) => {
  * API ENDPOINT: Update an expense (e.g. toggle need/want)
  * PUT /api/expenses/:id
  */
-app.put('/api/expenses/:id', authenticateToken, (req, res) => {
+app.put('/api/expenses/:id', authenticateToken, async (req, res) => {
     try {
         const { id } = req.params;
         const { name, amount, category, type, mood } = req.body;
 
         // Ensure the expense belongs to the user
-        const existing = db.prepare('SELECT * FROM expenses WHERE id = ? AND user_id = ?').get(id, req.user.userId);
+        const existing = (await db.execute({ sql: 'SELECT * FROM expenses WHERE id = ? AND user_id = ?', args: [id, req.user.userId] })).rows[0];
         if (!existing) {
             return res.status(404).json({ message: 'Expense not found' });
         }
 
-        db.prepare(`
+        await db.execute({ sql: `
             UPDATE expenses SET 
                 name = COALESCE(?, name),
                 amount = COALESCE(?, amount),
@@ -581,9 +584,9 @@ app.put('/api/expenses/:id', authenticateToken, (req, res) => {
                 type = COALESCE(?, type),
                 mood = COALESCE(?, mood)
             WHERE id = ? AND user_id = ?
-        `).run(name || null, amount || null, category || null, type || null, mood || null, id, req.user.userId);
+        `, args: [name || null, amount || null, category || null, type || null, mood || null, id, req.user.userId] });
 
-        const updated = db.prepare('SELECT * FROM expenses WHERE id = ?').get(id);
+        const updated = (await db.execute({ sql: 'SELECT * FROM expenses WHERE id = ?', args: [id] })).rows[0];
         res.json({ message: 'Expense updated', expense: updated });
     } catch (error) {
         console.error('Update expense error:', error);
@@ -595,16 +598,16 @@ app.put('/api/expenses/:id', authenticateToken, (req, res) => {
  * API ENDPOINT: Delete an expense
  * DELETE /api/expenses/:id
  */
-app.delete('/api/expenses/:id', authenticateToken, (req, res) => {
+app.delete('/api/expenses/:id', authenticateToken, async (req, res) => {
     try {
         const { id } = req.params;
 
-        const existing = db.prepare('SELECT * FROM expenses WHERE id = ? AND user_id = ?').get(id, req.user.userId);
+        const existing = (await db.execute({ sql: 'SELECT * FROM expenses WHERE id = ? AND user_id = ?', args: [id, req.user.userId] })).rows[0];
         if (!existing) {
             return res.status(404).json({ message: 'Expense not found' });
         }
 
-        db.prepare('DELETE FROM expenses WHERE id = ? AND user_id = ?').run(id, req.user.userId);
+        await db.execute({ sql: 'DELETE FROM expenses WHERE id = ? AND user_id = ?', args: [id, req.user.userId] });
 
         console.log(`🗑️ Expense deleted: ID ${id} by user ${req.user.userId}`);
         res.json({ message: 'Expense deleted' });
@@ -622,14 +625,14 @@ app.delete('/api/expenses/:id', authenticateToken, (req, res) => {
  * API ENDPOINT: Get user's budget
  * GET /api/budget
  */
-app.get('/api/budget', authenticateToken, (req, res) => {
+app.get('/api/budget', authenticateToken, async (req, res) => {
     try {
-        let budget = db.prepare('SELECT * FROM budgets WHERE user_id = ?').get(req.user.userId);
+        let budget = (await db.execute({ sql: 'SELECT * FROM budgets WHERE user_id = ?', args: [req.user.userId] })).rows[0];
 
         if (!budget) {
             // Create default budget for user
-            db.prepare('INSERT INTO budgets (user_id, monthly_budget) VALUES (?, 5000)').run(req.user.userId);
-            budget = db.prepare('SELECT * FROM budgets WHERE user_id = ?').get(req.user.userId);
+            await db.execute({ sql: 'INSERT INTO budgets (user_id, monthly_budget) VALUES (?, 5000)', args: [req.user.userId] });
+            budget = (await db.execute({ sql: 'SELECT * FROM budgets WHERE user_id = ?', args: [req.user.userId] })).rows[0];
         }
 
         res.json({ budget });
@@ -643,7 +646,7 @@ app.get('/api/budget', authenticateToken, (req, res) => {
  * API ENDPOINT: Update user's budget
  * PUT /api/budget
  */
-app.put('/api/budget', authenticateToken, (req, res) => {
+app.put('/api/budget', authenticateToken, async (req, res) => {
     try {
         const { monthly_budget } = req.body;
 
@@ -651,16 +654,16 @@ app.put('/api/budget', authenticateToken, (req, res) => {
             return res.status(400).json({ message: 'Valid budget amount is required' });
         }
 
-        const existing = db.prepare('SELECT * FROM budgets WHERE user_id = ?').get(req.user.userId);
+        const existing = (await db.execute({ sql: 'SELECT * FROM budgets WHERE user_id = ?', args: [req.user.userId] })).rows[0];
 
         if (existing) {
             db.prepare('UPDATE budgets SET monthly_budget = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?')
                 .run(monthly_budget, req.user.userId);
         } else {
-            db.prepare('INSERT INTO budgets (user_id, monthly_budget) VALUES (?, ?)').run(req.user.userId, monthly_budget);
+            await db.execute({ sql: 'INSERT INTO budgets (user_id, monthly_budget) VALUES (?, ?)', args: [req.user.userId, monthly_budget] });
         }
 
-        const budget = db.prepare('SELECT * FROM budgets WHERE user_id = ?').get(req.user.userId);
+        const budget = (await db.execute({ sql: 'SELECT * FROM budgets WHERE user_id = ?', args: [req.user.userId] })).rows[0];
         res.json({ message: 'Budget updated', budget });
     } catch (error) {
         console.error('Update budget error:', error);
@@ -678,7 +681,7 @@ app.put('/api/budget', authenticateToken, (req, res) => {
  * 
  * Returns spending totals for each day of the current week
  */
-app.get('/api/analytics/weekly', authenticateToken, (req, res) => {
+app.get('/api/analytics/weekly', authenticateToken, async (req, res) => {
     try {
         const refDate = req.query.date ? new Date(req.query.date) : new Date();
         const dayOfWeek = refDate.getDay(); // 0 = Sunday
@@ -717,7 +720,7 @@ app.get('/api/analytics/weekly', authenticateToken, (req, res) => {
  * 
  * Returns spending totals for each day of the current month
  */
-app.get('/api/analytics/monthly-chart', authenticateToken, (req, res) => {
+app.get('/api/analytics/monthly-chart', authenticateToken, async (req, res) => {
     try {
         const refDate = req.query.date ? new Date(req.query.date) : new Date();
         const year = refDate.getFullYear();
@@ -752,7 +755,7 @@ app.get('/api/analytics/monthly-chart', authenticateToken, (req, res) => {
  * 
  * Returns spending totals for each month of the current year
  */
-app.get('/api/analytics/yearly-chart', authenticateToken, (req, res) => {
+app.get('/api/analytics/yearly-chart', authenticateToken, async (req, res) => {
     try {
         const refDate = req.query.date ? new Date(req.query.date) : new Date();
         const year = refDate.getFullYear();
@@ -784,7 +787,7 @@ app.get('/api/analytics/yearly-chart', authenticateToken, (req, res) => {
  * API ENDPOINT: Category breakdown for pie/donut charts
  * GET /api/analytics/category-breakdown?timeframe=weekly|monthly|yearly&date=YYYY-MM-DD
  */
-app.get('/api/analytics/category-breakdown', authenticateToken, (req, res) => {
+app.get('/api/analytics/category-breakdown', authenticateToken, async (req, res) => {
     try {
         const { timeframe, date } = req.query;
         const refDate = date ? new Date(date) : new Date();
@@ -814,7 +817,7 @@ app.get('/api/analytics/category-breakdown', authenticateToken, (req, res) => {
         let breakdown = db.prepare(query).all(...params);
 
         // Normalize subscriptions to monthly equivalent
-        const subs = db.prepare('SELECT cost, cycle FROM subscriptions WHERE user_id = ?').all(req.user.userId);
+        const subs = (await db.execute({ sql: 'SELECT cost, cycle FROM subscriptions WHERE user_id = ?', args: [req.user.userId] })).rows;
         let monthlySubTotal = 0;
         subs.forEach(s => {
             if(s.cycle === 'yearly') monthlySubTotal += s.cost / 12;
@@ -842,7 +845,7 @@ app.get('/api/analytics/category-breakdown', authenticateToken, (req, res) => {
  * 
  * Returns total spent, needs vs wants breakdown for the month
  */
-app.get('/api/analytics/monthly', authenticateToken, (req, res) => {
+app.get('/api/analytics/monthly', authenticateToken, async (req, res) => {
     try {
         const month = req.query.month || new Date().toISOString().slice(0, 7);
 
@@ -863,7 +866,7 @@ app.get('/api/analytics/monthly', authenticateToken, (req, res) => {
         ).get(req.user.userId, `${month}%`);
 
         // Calculate normalized subscriptions
-        const subs = db.prepare('SELECT cost, cycle FROM subscriptions WHERE user_id = ?').all(req.user.userId);
+        const subs = (await db.execute({ sql: 'SELECT cost, cycle FROM subscriptions WHERE user_id = ?', args: [req.user.userId] })).rows;
         let subTotal = 0;
         subs.forEach(s => {
             if(s.cycle === 'yearly') subTotal += s.cost / 12;
@@ -889,7 +892,7 @@ app.get('/api/analytics/monthly', authenticateToken, (req, res) => {
  * 
  * Returns the number of consecutive days the user has logged at least one expense
  */
-app.get('/api/analytics/streak', authenticateToken, (req, res) => {
+app.get('/api/analytics/streak', authenticateToken, async (req, res) => {
     try {
         // Count consecutive days (backwards from today) with at least 1 expense
         let streak = 0;
@@ -928,9 +931,9 @@ app.get('/api/analytics/streak', authenticateToken, (req, res) => {
  */
 
 // Get all subscriptions
-app.get('/api/subscriptions', authenticateToken, (req, res) => {
+app.get('/api/subscriptions', authenticateToken, async (req, res) => {
     try {
-        const subs = db.prepare('SELECT * FROM subscriptions WHERE user_id = ? ORDER BY start_date ASC').all(req.user.userId);
+        const subs = (await db.execute({ sql: 'SELECT * FROM subscriptions WHERE user_id = ? ORDER BY start_date ASC', args: [req.user.userId] })).rows;
         res.json(subs);
     } catch (error) {
         console.error('Fetch subscriptions error:', error);
@@ -939,19 +942,19 @@ app.get('/api/subscriptions', authenticateToken, (req, res) => {
 });
 
 // Add new subscription
-app.post('/api/subscriptions', authenticateToken, (req, res) => {
+app.post('/api/subscriptions', authenticateToken, async (req, res) => {
     try {
         const { name, cost, cycle, start_date } = req.body;
         if (!name || isNaN(cost) || !start_date || !cycle) {
             return res.status(400).json({ message: 'Invalid subscription data' });
         }
 
-        const result = db.prepare(`
+        const result = await db.execute({ sql: `
             INSERT INTO subscriptions (user_id, name, cost, cycle, start_date)
             VALUES (?, ?, ?, ?, ?)
-        `).run(req.user.userId, name, Number(cost), cycle, start_date);
+        `, args: [req.user.userId, name, Number(cost), cycle, start_date] });
 
-        res.status(201).json({ message: 'Subscription added successfully', id: result.lastInsertRowid });
+        res.status(201).json({ message: 'Subscription added successfully', id: Number(result.lastInsertRowid) });
     } catch (error) {
         console.error('Add subscription error:', error);
         res.status(500).json({ message: 'Server error saving subscription' });
@@ -959,12 +962,12 @@ app.post('/api/subscriptions', authenticateToken, (req, res) => {
 });
 
 // Delete subscription
-app.delete('/api/subscriptions/:id', authenticateToken, (req, res) => {
+app.delete('/api/subscriptions/:id', authenticateToken, async (req, res) => {
     try {
         const { id } = req.params;
-        const result = db.prepare('DELETE FROM subscriptions WHERE id = ? AND user_id = ?').run(id, req.user.userId);
+        const result = await db.execute({ sql: 'DELETE FROM subscriptions WHERE id = ? AND user_id = ?', args: [id, req.user.userId] });
         
-        if (result.changes === 0) {
+        if (result.rowsAffected === 0) {
             return res.status(404).json({ message: 'Subscription not found or unauthorized' });
         }
         res.json({ message: 'Subscription deleted successfully' });
@@ -1016,7 +1019,7 @@ module.exports = app;
 cron.schedule('30 3 1 * *', async () => {
     console.log('📅 Running monthly summary email job...');
 
-    const users = db.prepare('SELECT id, name, email FROM users').all();
+    const users = (await db.execute('SELECT id, name, email FROM users')).rows;
 
     for (const user of users) {
         try {
@@ -1025,25 +1028,25 @@ cron.schedule('30 3 1 * *', async () => {
             const ym = `${prevMonth.getFullYear()}-${String(prevMonth.getMonth() + 1).padStart(2, '0')}`;
 
             // Total spent last month
-            const totalRow = db.prepare(`
+            const totalRow = (await db.execute({ sql: `
                 SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as cnt
                 FROM expenses
                 WHERE user_id = ? AND strftime('%Y-%m', date) = ?
-            `).get(user.id, ym);
+            `, args: [user.id, ym] })).rows[0];
 
             // Budget
-            const budgetRow = db.prepare('SELECT monthly_budget FROM budgets WHERE user_id = ?').get(user.id);
+            const budgetRow = (await db.execute({ sql: 'SELECT monthly_budget FROM budgets WHERE user_id = ?', args: [user.id] })).rows[0];
 
             // Top category
-            const categories = db.prepare(`
+            const categories = (await db.execute({ sql: `
                 SELECT category as label, SUM(amount) as total
                 FROM expenses
                 WHERE user_id = ? AND strftime('%Y-%m', date) = ?
                 GROUP BY category ORDER BY total DESC LIMIT 1
-            `).get(user.id, ym);
+            `, args: [user.id, ym] })).rows[0];
 
             // Subscription normalized monthly cost
-            const subs = db.prepare('SELECT cost, cycle FROM subscriptions WHERE user_id = ?').all(user.id);
+            const subs = (await db.execute({ sql: 'SELECT cost, cycle FROM subscriptions WHERE user_id = ?', args: [user.id] })).rows;
             const subMonthly = subs.reduce((acc, s) => acc + (s.cycle === 'yearly' ? s.cost / 12 : s.cost), 0);
 
             const totalSpent = (totalRow.total || 0) + subMonthly;
@@ -1068,36 +1071,36 @@ cron.schedule('30 3 1 * *', async () => {
 cron.schedule('30 3 1 1 *', async () => {
     console.log('🎉 Running yearly summary email job...');
 
-    const users = db.prepare('SELECT id, name, email FROM users').all();
+    const users = (await db.execute('SELECT id, name, email FROM users')).rows;
     const prevYear = new Date().getFullYear() - 1;
 
     for (const user of users) {
         try {
             // Total spent in the previous year
-            const totalRow = db.prepare(`
+            const totalRow = (await db.execute({ sql: `
                 SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as cnt
                 FROM expenses
                 WHERE user_id = ? AND strftime('%Y', date) = ?
-            `).get(user.id, String(prevYear));
+            `, args: [user.id, String(prevYear)] })).rows[0];
 
             // Average monthly spend
             const avgMonthly = Math.round((totalRow.total || 0) / 12);
 
             // Top category for the year
-            const topCat = db.prepare(`
+            const topCat = (await db.execute({ sql: `
                 SELECT category as label, SUM(amount) as total
                 FROM expenses
                 WHERE user_id = ? AND strftime('%Y', date) = ?
                 GROUP BY category ORDER BY total DESC LIMIT 1
-            `).get(user.id, String(prevYear));
+            `, args: [user.id, String(prevYear)] })).rows[0];
 
             // Best month (lowest spending, only months with data)
-            const monthlyRows = db.prepare(`
+            const monthlyRows = (await db.execute({ sql: `
                 SELECT strftime('%Y-%m', date) as ym, SUM(amount) as total
                 FROM expenses
                 WHERE user_id = ? AND strftime('%Y', date) = ?
                 GROUP BY ym ORDER BY total ASC LIMIT 1
-            `).get(user.id, String(prevYear));
+            `, args: [user.id, String(prevYear)] })).rows[0];
 
             let bestMonth = null;
             if (monthlyRows) {
