@@ -36,11 +36,11 @@ async function sendMail({ to, subject, html }) {
   const response = await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${BREVO_API_KEY}`,
+      'api-key': BREVO_API_KEY,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      sender: { email: EMAIL_FROM, name: 'Spense' },
+      sender: { name: 'Spense', email: EMAIL_FROM },
       to: [{ email: to }],
       subject,
       htmlContent: html
@@ -48,10 +48,8 @@ async function sendMail({ to, subject, html }) {
   });
 
   if (!response.ok) {
-    const errorBody = await response.text();
-    const message = `Brevo API error (${response.status}): ${errorBody}`;
-    console.error(`❌ Brevo error sending email to ${to}: ${message}`);
-    throw new Error(message);
+    const err = await response.text();
+    throw new Error(`Brevo API error (${response.status}): ${err}`);
   }
 }
 
