@@ -33,7 +33,8 @@ const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key-only';
 // Middleware
 app.use(cors()); // Allow requests from frontend
 app.use(express.json()); // Parse JSON request bodies
-app.use(express.static('public')); // Serve static files from public folder
+const path = require('path');
+app.use(express.static(path.join(__dirname, 'public'))); // Serve static files from public folder
 
 /**
  * DATABASE SETUP
