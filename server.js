@@ -39,10 +39,16 @@ app.use(express.static('public')); // Serve static files from public folder
  * DATABASE SETUP
  * Using SQLite - a simple file-based database
  * Perfect for learning and small applications
+ * 
+ * NOTE: On Vercel, the filesystem is read-only except /tmp.
+ * We use /tmp/spense.db there. Data won't persist between cold starts.
+ * For persistent data on Vercel, switch to a cloud DB (Turso, Neon, Supabase).
  */
 
-// Create/open database file
-const db = new Database('spense.db');
+// Create/open database file — use /tmp on Vercel (serverless read-only fs)
+const path = require('path');
+const DB_PATH = process.env.VERCEL ? '/tmp/spense.db' : path.join(__dirname, 'spense.db');
+const db = new Database(DB_PATH);
 
 // Create users table if it doesn't exist
 db.exec(`
@@ -970,12 +976,15 @@ app.delete('/api/subscriptions/:id', authenticateToken, (req, res) => {
 
 /**
  * START SERVER
+ * On Vercel, the app is exported as a serverless function — no listen() needed.
+ * Locally, we call listen() as usual.
  */
-app.listen(PORT, () => {
-    console.log(`
+if (!process.env.VERCEL) {
+    app.listen(PORT, () => {
+        console.log(`
 🚀 Spense Backend Server Running!
 📍 Server: http://localhost:${PORT}
-📊 Database: spense.db
+📊 Database: ${DB_PATH}
 🌐 Dashboard: http://localhost:${PORT}/dashboard.html
     
 API Endpoints:
@@ -994,8 +1003,12 @@ API Endpoints:
 🔥 GET    /api/analytics/streak  - Spending streak
 
 Press Ctrl+C to stop the server
-    `);
-});
+        `);
+    });
+}
+
+// Export for Vercel serverless
+module.exports = app;
 
 // ─── CRON JOB: Monthly Summary ────────────────────────────────────────────────
 // Runs at 9:00 AM IST on the 1st of every month
