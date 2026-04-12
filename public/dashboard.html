@@ -1719,7 +1719,14 @@
                 const res = await fetch(`${API_URL}/budget`, { headers: authHeaders() });
                 if (res.status === 401 || res.status === 403) { logout(); return; }
                 const data = await res.json();
-                currentBudget = data.budget.monthly_budget;
+                if (!res.ok) {
+                    console.error('Budget fetch failed:', data.message || res.status);
+                    return;
+                }
+                const raw = data.budget && data.budget.monthly_budget;
+                if (raw != null && raw !== '') {
+                    currentBudget = Number(raw);
+                }
                 updateBudgetDisplay();
             } catch (err) {
                 console.error('Error fetching budget:', err);
@@ -1860,7 +1867,8 @@
         // Fetch streak
         async function fetchStreak() {
             try {
-                const res = await fetch(`${API_URL}/analytics/streak`, { headers: authHeaders() });
+                const asOf = encodeURIComponent(getLocalDateString());
+                const res = await fetch(`${API_URL}/analytics/streak?asOf=${asOf}`, { headers: authHeaders() });
                 if (res.status === 401 || res.status === 403) return;
                 const data = await res.json();
                 const streak = data.streak || 0;
@@ -2262,7 +2270,7 @@
                 return;
             }
 
-            if (newBudget !== currentBudget) {
+            if (newBudget !== Number(currentBudget)) {
                 try {
                     const res = await fetch(`${API_URL}/budget`, {
                         method: 'PUT',
@@ -2272,7 +2280,8 @@
 
                     const data = await res.json();
                     if (res.ok) {
-                        currentBudget = data.budget?.monthly_budget || newBudget;
+                        const raw = data.budget && data.budget.monthly_budget;
+                        currentBudget = raw != null ? Number(raw) : newBudget;
                         await fetchMonthlySummary(); // Refresh dependent calcs instantly
                     } else {
                         alert(data.message || 'Failed to update budget');
@@ -2309,7 +2318,8 @@
 
                 const data = await res.json();
                 if (res.ok) {
-                    currentBudget = data.budget?.monthly_budget || newBudget;
+                    const raw = data.budget && data.budget.monthly_budget;
+                    currentBudget = raw != null ? Number(raw) : newBudget;
                     if (typeof closeBudgetModal === 'function') {
                         closeBudgetModal();
                     }
@@ -2345,7 +2355,8 @@
             await Promise.all([
                 fetchExpenses(),
                 fetchBudget(),
-                fetchChartData()
+                fetchChartData(),
+                fetchStreak()
             ]);
             // Fetch monthly summary after budget is loaded (needs currentBudget)
             await fetchMonthlySummary();

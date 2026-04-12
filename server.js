@@ -13,8 +13,7 @@
  * npm install express cors bcryptjs jsonwebtoken better-sqlite3 dotenv
  */
 
-const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '.env') });
+require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
@@ -45,6 +44,21 @@ function getLocalDateString(value = new Date()) {
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
+}
+
+/** Gregorian calendar YYYY-MM-DD minus N days (UTC components; matches client-stored date strings). */
+function subtractCalendarDays(ymd, deltaDays) {
+    const parts = ymd.split('-').map(Number);
+    const y = parts[0];
+    const m = parts[1];
+    const day = parts[2];
+    if (!y || !m || !day) return ymd;
+    const dt = new Date(Date.UTC(y, m - 1, day));
+    dt.setUTCDate(dt.getUTCDate() - deltaDays);
+    const yy = dt.getUTCFullYear();
+    const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(dt.getUTCDate()).padStart(2, '0');
+    return `${yy}-${mm}-${dd}`;
 }
 
 /**
@@ -927,26 +941,29 @@ app.get('/api/analytics/monthly', authenticateToken, async (req, res) => {
  */
 app.get('/api/analytics/streak', authenticateToken, async (req, res) => {
     try {
-        // Count consecutive days (backwards from today) with at least 1 expense
+        // Anchor to client's "today" so streak matches expense dates (browser en-CA dates).
+        const asOfParam = req.query.asOf;
+        const asOf = asOfParam && /^\d{4}-\d{2}-\d{2}$/.test(String(asOfParam))
+            ? String(asOfParam)
+            : getLocalDateString();
+
         let streak = 0;
-        const today = new Date();
 
         for (let i = 0; i < 365; i++) {
-            const d = new Date(today);
-            d.setDate(today.getDate() - i);
-            const dateStr = getLocalDateString(d);
+            const dateStr = subtractCalendarDays(asOf, i);
 
             const result = (await db.execute({
                 sql: 'SELECT COUNT(*) as count FROM expenses WHERE user_id = ? AND date = ?',
                 args: [req.user.userId, dateStr]
             })).rows[0];
 
-            if (result.count > 0) {
+            const count = Number(result.count);
+            if (count > 0) {
                 streak++;
             } else {
                 if (i === 0) {
                     // haven't logged *today* yet, don't break the streak from yesterday
-                    continue; 
+                    continue;
                 } else {
                     break;
                 }
