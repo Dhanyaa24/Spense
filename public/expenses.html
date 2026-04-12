@@ -2081,7 +2081,13 @@
 
         async function updateBudget(e) {
             e.preventDefault();
-            const newBudget = parseFloat(document.getElementById('budgetInput').value);
+            const budgetInput = document.getElementById('budgetInput') || document.getElementById('inlineBudgetInput');
+            if (!budgetInput) {
+                alert('Budget input field not found');
+                return;
+            }
+
+            const newBudget = parseFloat(budgetInput.value);
             if (isNaN(newBudget) || newBudget <= 0) {
                 alert('Please enter a valid budget amount greater than 0.');
                 return;
@@ -2097,7 +2103,9 @@
                 const data = await res.json();
                 if (res.ok) {
                     currentBudget = data.budget?.monthly_budget || newBudget;
-                    closeBudgetModal();
+                    if (typeof closeBudgetModal === 'function') {
+                        closeBudgetModal();
+                    }
                     await loadDashboardData();
                 } else {
                     alert(data.message || 'Failed to update budget');
@@ -2106,6 +2114,13 @@
             } catch (err) {
                 console.error('Error updating budget:', err);
                 alert('Network error. Is the server running?');
+            }
+        }
+
+        function closeBudgetModal() {
+            const modal = document.getElementById('budgetModal');
+            if (modal) {
+                modal.style.display = 'none';
             }
         }
 
