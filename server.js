@@ -13,7 +13,8 @@
  * npm install express cors bcryptjs jsonwebtoken better-sqlite3 dotenv
  */
 
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const express = require('express');
 const cors = require('cors');
@@ -37,6 +38,14 @@ app.use(cors()); // Allow requests from frontend
 app.use(express.json()); // Parse JSON request bodies
 const path = require('path');
 app.use(express.static(path.join(__dirname, 'public'))); // Serve static files from public folder
+
+function getLocalDateString(value = new Date()) {
+    const d = value instanceof Date ? value : new Date(value);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
 
 /**
  * DATABASE SETUP
@@ -537,7 +546,7 @@ app.post('/api/user/theme', authenticateToken, async (req, res) => {
  */
 app.get('/api/expenses', authenticateToken, async (req, res) => {
     try {
-        const date = req.query.date || new Date().toISOString().split('T')[0];
+        const date = req.query.date || getLocalDateString();
         const expenses = (await db.execute({
             sql: 'SELECT * FROM expenses WHERE user_id = ? AND date = ? ORDER BY created_at DESC',
             args: [req.user.userId, date]
@@ -562,7 +571,7 @@ app.post('/api/expenses', authenticateToken, async (req, res) => {
             return res.status(400).json({ message: 'Name, amount, and category are required' });
         }
 
-        const expenseDate = date || new Date().toISOString().split('T')[0];
+        const expenseDate = date || getLocalDateString();
 
         const result = await db.execute({ sql: `
             INSERT INTO expenses (user_id, name, amount, category, type, mood, date)
@@ -675,9 +684,9 @@ app.put('/api/budget', authenticateToken, async (req, res) => {
         const existing = (await db.execute({ sql: 'SELECT * FROM budgets WHERE user_id = ?', args: [req.user.userId] })).rows[0];
 
         if (existing) {
-            await db.execute({ sql: 'UPDATE budgets SET monthly_budget = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?', args: [monthly_budget, req.user.userId] });
+            await db.execute({ sql: 'UPDATE budgets SET monthly_budget = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?', args: [monthlyBudget, req.user.userId] });
         } else {
-            await db.execute({ sql: 'INSERT INTO budgets (user_id, monthly_budget) VALUES (?, ?)', args: [req.user.userId, monthly_budget] });
+            await db.execute({ sql: 'INSERT INTO budgets (user_id, monthly_budget) VALUES (?, ?)', args: [req.user.userId, monthlyBudget] });
         }
 
         const budget = (await db.execute({ sql: 'SELECT * FROM budgets WHERE user_id = ?', args: [req.user.userId] })).rows[0];
@@ -711,7 +720,7 @@ app.get('/api/analytics/weekly', authenticateToken, async (req, res) => {
         for (let i = 0; i < 7; i++) {
             const d = new Date(monday);
             d.setDate(monday.getDate() + i);
-            const dateStr = d.toISOString().split('T')[0];
+            const dateStr = getLocalDateString(d);
 
             const result = (await db.execute({
                 sql: 'SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = ? AND date = ?',
@@ -748,7 +757,7 @@ app.get('/api/analytics/monthly-chart', authenticateToken, async (req, res) => {
         const monthlyData = [];
 
         for (let i = 1; i <= daysInMonth; i++) {
-            const dateStr = new Date(year, month, i, 12, 0, 0).toISOString().split('T')[0];
+            const dateStr = getLocalDateString(new Date(year, month, i, 12, 0, 0));
             const result = (await db.execute({
                 sql: 'SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = ? AND date = ?',
                 args: [req.user.userId, dateStr]
@@ -818,14 +827,14 @@ app.get('/api/analytics/category-breakdown', authenticateToken, async (req, res)
             const dayOfWeek = refDate.getDay();
             const monday = new Date(refDate);
             monday.setDate(refDate.getDate() - ((dayOfWeek + 6) % 7));
-            const rangeStart = monday.toISOString().split('T')[0];
+            const rangeStart = getLocalDateString(monday);
             const sunday = new Date(monday);
             sunday.setDate(monday.getDate() + 6);
-            const rangeEnd = sunday.toISOString().split('T')[0];
+            const rangeEnd = getLocalDateString(sunday);
             query = 'SELECT category as label, SUM(amount) as total FROM expenses WHERE user_id = ? AND date BETWEEN ? AND ? GROUP BY category';
             params.push(rangeStart, rangeEnd);
         } else if (timeframe === 'monthly') {
-            const month = refDate.toISOString().slice(0, 7);
+            const month = getLocalDateString(refDate).slice(0, 7);
             query = 'SELECT category as label, SUM(amount) as total FROM expenses WHERE user_id = ? AND date LIKE ? GROUP BY category';
             params.push(`${month}%`);
         } else {
@@ -867,7 +876,7 @@ app.get('/api/analytics/category-breakdown', authenticateToken, async (req, res)
  */
 app.get('/api/analytics/monthly', authenticateToken, async (req, res) => {
     try {
-        const month = req.query.month || new Date().toISOString().slice(0, 7);
+        const month = req.query.month || getLocalDateString().slice(0, 7);
 
         const totalSpent = (await db.execute({
             sql: "SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = ? AND date LIKE ?",
@@ -925,7 +934,7 @@ app.get('/api/analytics/streak', authenticateToken, async (req, res) => {
         for (let i = 0; i < 365; i++) {
             const d = new Date(today);
             d.setDate(today.getDate() - i);
-            const dateStr = d.toISOString().split('T')[0];
+            const dateStr = getLocalDateString(d);
 
             const result = (await db.execute({
                 sql: 'SELECT COUNT(*) as count FROM expenses WHERE user_id = ? AND date = ?',

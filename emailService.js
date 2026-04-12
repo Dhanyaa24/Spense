@@ -11,13 +11,14 @@
  *   2. Set BREVO_API_KEY in your environment
  */
 
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 // Values are now pulled from the .env file
 const EMAIL_FROM = process.env.EMAIL_FROM || 'no-reply@spense.app';
 const BREVO_API_KEY = process.env.BREVO_API_KEY?.trim();
-const APP_URL = process.env.APP_URL || 'http://localhost:3000';
+const APP_URL = process.env.APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
 const RESET_LINK_EXPIRY_HOURS = Number(process.env.RESET_TOKEN_EXPIRY_HOURS) || 6;
 const RESET_LINK_EXPIRY_TEXT = RESET_LINK_EXPIRY_HOURS === 1 ? '1 hour' : `${RESET_LINK_EXPIRY_HOURS} hours`;
 // ──────────────────────────────────────────────────────────────────────────────
