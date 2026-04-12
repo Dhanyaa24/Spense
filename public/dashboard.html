@@ -1046,7 +1046,7 @@
                     </div>
                     <div
                         style="display:flex; justify-content:space-between; margin-top:1rem; padding-top:0.5rem; border-top:1px dashed var(--honey-oatmilk);">
-                        <button onclick="pickDate(new Date().toISOString().split('T')[0]); toggleCustomCalendar(event)"
+                        <button onclick="pickDate(getLocalDateString()); toggleCustomCalendar(event)"
                             style="border:none; background:transparent; font-weight:600; color:var(--savory-sage); cursor:pointer;">Today</button>
                         <button onclick="toggleCustomCalendar(event)"
                             style="border:none; background:transparent; font-weight:600; color:var(--light-text); cursor:pointer;">Close</button>
@@ -1507,7 +1507,7 @@
         let currentNeedWant = 'need';
         let selectedMoodEmoji = 'smile';
         let currentBudget = 5000;
-        let selectedDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+        let selectedDate = getLocalDateString(); // YYYY-MM-DD
 
         // ============================================================
         // AUTH HELPERS
@@ -1551,10 +1551,15 @@
             return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
         }
 
+        function getLocalDateString(value = new Date()) {
+            const d = value instanceof Date ? value : new Date(value);
+            return d.toLocaleDateString('en-CA');
+        }
+
         function updateDateDisplay() {
             document.getElementById('currentDate').textContent = formatDateDisplay(selectedDate);
 
-            const today = new Date().toISOString().split('T')[0];
+            const today = getLocalDateString();
             const isToday = selectedDate === today;
             document.getElementById('panelTitle').textContent = isToday ? "Today's Expenses" : `Expenses for ${formatDateDisplay(selectedDate)}`;
         }
@@ -1593,10 +1598,10 @@
                 grid.innerHTML += `<div style="padding:0.4rem; text-align:center; color:var(--light-text); opacity:0.5; font-size:0.9rem;">${prevDays - firstDay + i + 1}</div>`;
             }
 
-            const todayStr = new Date().toISOString().split('T')[0];
+            const todayStr = getLocalDateString();
             for (let i = 1; i <= daysInMonth; i++) {
                 const checkDate = new Date(currentCalDate.getFullYear(), currentCalDate.getMonth(), i, 12, 0, 0); // noon avoids tz shifts
-                const localISOString = checkDate.toISOString().split('T')[0];
+                const localISOString = getLocalDateString(checkDate);
 
                 const isSelected = localISOString === selectedDate;
                 const isToday = localISOString === todayStr;
