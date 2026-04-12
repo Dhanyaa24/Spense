@@ -11,14 +11,46 @@
  *   2. Set BREVO_API_KEY in your environment
  */
 
-const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '.env') });
+require('dotenv').config();
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 // Values are now pulled from the .env file
 const EMAIL_FROM = process.env.EMAIL_FROM || 'no-reply@spense.app';
 const BREVO_API_KEY = process.env.BREVO_API_KEY?.trim();
-const APP_URL = process.env.APP_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+
+/**
+ * Public site URL for links inside emails (dashboard, password reset).
+ * Set APP_URL on your host (Railway/Vercel/Render) — .env is gitignored and is not deployed by default.
+ */
+function normalizePublicBaseUrl(raw) {
+  if (raw == null || raw === '') return null;
+  let s = String(raw).trim();
+  if (!s) return null;
+  if (s.endsWith('/')) s = s.slice(0, -1);
+  if (/^https?:\/\//i.test(s)) return s;
+  if (/localhost/i.test(s) || /^127\.\d+\.\d+\.\d+/.test(s)) return `http://${s}`;
+  return `https://${s}`;
+}
+
+function resolvePublicAppUrl() {
+  const candidates = [
+    process.env.APP_URL,
+    process.env.PUBLIC_URL,
+    process.env.FRONTEND_URL,
+    process.env.SITE_URL,
+    process.env.RENDER_EXTERNAL_URL,
+    process.env.RAILWAY_PUBLIC_DOMAIN,
+    process.env.VERCEL_URL
+  ];
+
+  for (const c of candidates) {
+    const n = normalizePublicBaseUrl(c);
+    if (n) return n;
+  }
+  return 'http://localhost:3000';
+}
+
+const APP_URL = resolvePublicAppUrl();
 const RESET_LINK_EXPIRY_HOURS = Number(process.env.RESET_TOKEN_EXPIRY_HOURS) || 6;
 const RESET_LINK_EXPIRY_TEXT = RESET_LINK_EXPIRY_HOURS === 1 ? '1 hour' : `${RESET_LINK_EXPIRY_HOURS} hours`;
 // ──────────────────────────────────────────────────────────────────────────────
@@ -27,7 +59,14 @@ if (!BREVO_API_KEY) {
   console.warn('⚠️  BREVO_API_KEY is missing. Set it in your .env or Railway Variables.');
 }
 
-console.log('✅ Email service loaded: Brevo API mode');
+if (BREVO_API_KEY && /localhost|127\.0\.0\.1/i.test(APP_URL)) {
+  console.warn(
+    '⚠️  Email links use APP_URL=%s — set APP_URL (or PUBLIC_URL / FRONTEND_URL) to your live HTTPS URL in hosting env vars.',
+    APP_URL
+  );
+}
+
+console.log('✅ Email service loaded: Brevo API mode (public links → %s)', APP_URL);
 
 async function sendMail({ to, subject, html }) {
   if (!BREVO_API_KEY) {
